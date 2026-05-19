@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}User Management — EVPS Admin{% endblock %}
+
+{% block breadcrumb %}
+<div class="gov-breadcrumb">
+  <div class="bc-inner">
+    <a href="{{ url_for('admin.dashboard') }}">Dashboard</a>
+    <span class="bc-sep">/</span>
+    <span class="bc-current">User Management</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title-bar">
+  <div>
+    <h1>User Management</h1>
+    <p class="page-desc">View and manage all registered user accounts in the EVPS portal.</p>
+  </div>
+  <div>
+    <a href="{{ url_for('admin.add_user') }}" class="btn btn-primary">Add New User</a>
+  </div>
+</div>
+
+<!-- Search -->
+<div class="gov-section">
+  <div class="gov-section-header">Search Users</div>
+  <div class="gov-section-body">
+    <form method="GET" action="{{ url_for('admin.users') }}" class="filter-row">
+      <div class="fg">
+        <label for="f-search">Search by Name / Username / Email</label>
+        <input type="text" id="f-search" name="search" value="{{ search }}" placeholder="Enter name, username, or email">
+      </div>
+      <div class="fg" style="justify-content:flex-end;">
+        <label>&nbsp;</label>
+        <div style="display:flex; gap:6px;">
+          <button type="submit" class="btn btn-primary btn-sm">Search</button>
+          <a href="{{ url_for('admin.users') }}" class="btn btn-secondary btn-sm">Clear</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- User Table -->
+<div class="gov-section">
+  <div class="gov-section-header">
+    <span>Registered Users</span>
+    <span class="badge" style="background:#AACCFF22; border:1px solid #AACCFF; color:#CCDDFF; font-size:11px;">Total: {{ users|length }}</span>
+  </div>
+  <div class="gov-section-body">
+    <table class="gov-table">
+      <thead>
+        <tr>
+          <th>S.No.</th>
+          <th>Full Name</th>
+          <th>Username</th>
+          <th>Role</th>
+          <th>Email</th>
+          <th>Phone</th>
+          <th>Status</th>
+          <th>Created On</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if users %}
+          {% for u in users %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td class="fw-bold">{{ u.full_name }}</td>
+            <td class="font-mono" style="font-size:12px;">{{ u.username }}</td>
+            <td><span class="badge badge-{{ u.role|replace('_','-') }}">{{ 'Administrator' if u.role == 'admin' else 'Vehicle Owner' }}</span></td>
+            <td style="font-size:12px;">{{ u.email or '—' }}</td>
+            <td style="font-size:12px;">{{ u.phone or '—' }}</td>
+            <td><span class="badge badge-{{ 'active' if u.is_active else 'inactive' }}">{{ 'Active' if u.is_active else 'Inactive' }}</span></td>
+            <td style="font-size:12px; white-space:nowrap;">{{ u.created_at.strftime('%d %b %Y') }}</td>
+            <td style="white-space:nowrap;">
+              <a href="{{ url_for('admin.edit_user', uid=u.id) }}" class="btn btn-sm btn-secondary">Edit</a>
+              {% if u.id != current_user.id %}
+              <form method="POST" action="{{ url_for('admin.toggle_user', uid=u.id) }}" style="display:inline;">
+                <button type="submit"
+                  class="btn btn-sm {{ 'btn-danger' if u.is_active else 'btn-success' }}"
+                  onclick="return confirm('{{ 'Deactivate' if u.is_active else 'Activate' }} this account?');">
+                  {{ 'Deactivate' if u.is_active else 'Activate' }}
+                </button>
+              </form>
+              {% else %}
+              <span class="font-sm text-muted">(You)</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr class="no-data"><td colspan="9">No users found.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

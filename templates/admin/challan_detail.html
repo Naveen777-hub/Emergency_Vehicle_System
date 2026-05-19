@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Challan {{ challan.challan_number }} — EVPS Admin{% endblock %}
+
+{% block breadcrumb %}
+<div class="gov-breadcrumb">
+  <div class="bc-inner">
+    <a href="{{ url_for('admin.dashboard') }}">Dashboard</a>
+    <span class="bc-sep">/</span>
+    <a href="{{ url_for('admin.challans') }}">Challan Management</a>
+    <span class="bc-sep">/</span>
+    <span class="bc-current">{{ challan.challan_number }}</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title-bar">
+  <div>
+    <h1>Challan Detail</h1>
+    <p class="page-desc">Challan Number: <strong class="font-mono">{{ challan.challan_number }}</strong></p>
+  </div>
+  <div class="d-flex gap-1 align-center">
+    <span class="badge badge-{{ challan.status|lower }}" style="font-size:13px; padding:4px 12px;">{{ challan.status }}</span>
+    <a href="{{ url_for('admin.challans') }}" class="btn btn-secondary btn-sm">Back to List</a>
+  </div>
+</div>
+
+<div class="row">
+
+  <!-- Left Column: Challan Details -->
+  <div class="col-half">
+
+    <!-- Challan Information -->
+    <div class="gov-section">
+      <div class="gov-section-header">Challan Information</div>
+      <div class="gov-section-body">
+        <table class="detail-table">
+          <tr><td class="dt-label">Challan Number</td><td class="font-mono">{{ challan.challan_number }}</td></tr>
+          <tr><td class="dt-label">Date of Issue</td><td>{{ challan.created_at.strftime('%d %B %Y') }}</td></tr>
+          <tr><td class="dt-label">Time of Detection</td><td>{{ challan.created_at.strftime('%H:%M:%S') }}</td></tr>
+          <tr><td class="dt-label">Current Status</td><td><span class="badge badge-{{ challan.status|lower }}">{{ challan.status }}</span></td></tr>
+          <tr><td class="dt-label">Challan Amount</td><td class="fw-bold" style="font-size:16px;">Rs. {{ "%.2f"|format(challan.amount) }}</td></tr>
+          <tr><td class="dt-label">Payment Date</td><td>{{ challan.paid_at.strftime('%d %B %Y, %H:%M') if challan.paid_at else 'Not yet paid' }}</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Vehicle Details -->
+    <div class="gov-section">
+      <div class="gov-section-header">Vehicle Details</div>
+      <div class="gov-section-body">
+        <table class="detail-table">
+          <tr><td class="dt-label">Registration Number</td><td class="fw-bold font-mono" style="font-size:16px;">{{ challan.plate_number }}</td></tr>
+          <tr><td class="dt-label">Vehicle Type</td><td>{{ vehicle.vehicle_type if vehicle else 'Not Registered' }}</td></tr>
+          <tr><td class="dt-label">Registered Owner</td><td>{{ vehicle.owner_name if vehicle else 'Not Registered' }}</td></tr>
+          <tr>
+            <td class="dt-label">Linked User Account</td>
+            <td>
+              {% if registered_owner %}
+                {{ registered_owner.full_name }}
+                <span class="text-muted">({{ registered_owner.username }})</span>
+              {% else %}
+                <span class="text-muted">Not linked to any user account</span>
+              {% endif %}
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- AI Pipeline Analysis -->
+    <div class="gov-section">
+      <div class="gov-section-header">AI Pipeline Analysis</div>
+      <div class="gov-section-body">
+        <table class="detail-table">
+          <tr><td class="dt-label">System Action</td>
+            <td>
+              {% if challan.action == 'Challan Generated' %}
+                <span class="badge badge-challan">{{ challan.action }}</span>
+              {% elif challan.action == 'OCR Failed' %}
+                <span class="badge badge-disputed">{{ challan.action }}</span>
+              {% else %}
+                {{ challan.action }}
+              {% endif %}
+            </td>
+          </tr>
+          <tr><td class="dt-label">Traffic Density</td><td>{{ "%.1f"|format(challan.density_pct) }}%</td></tr>
+          <tr><td class="dt-label">Free Space Detected</td><td>{{ challan.free_space_px }} pixels</td></tr>
+          <tr><td class="dt-label">Decision Reason</td><td style="font-size:12px;">{{ challan.pipeline_status or '—' }}</td></tr>
+          <tr><td class="dt-label">Detection Engine</td><td>EasyOCR (Raspberry Pi Edge Node)</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Update Status (Admin Action) -->
+    <div class="gov-section">
+      <div class="gov-section-header">Update Challan Status</div>
+      <div class="gov-section-body padded">
+        <form method="POST" action="{{ url_for('admin.update_challan_status', cid=challan.id) }}" class="gov-form">
+          <div class="form-group">
+            <label for="status" class="req">New Status</label>
+            <select name="status" id="status">
+              <option value="Pending"  {% if challan.status == 'Pending'  %}selected{% endif %}>Pending</option>
+              <option value="Paid"     {% if challan.status == 'Paid'     %}selected{% endif %}>Paid</option>
+              <option value="Disputed" {% if challan.status == 'Disputed' %}selected{% endif %}>Disputed</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary">Update Status</button>
+        </form>
+      </div>
+    </div>
+
+  </div><!-- /col-half -->
+
+  <!-- Right Column: Images -->
+  <div class="col-half">
+
+    <div class="gov-section">
+      <div class="gov-section-header">Wide Traffic View (Uploaded Camera Feed)</div>
+      <div class="gov-section-body">
+        {% if challan.wide_image_url %}
+          <img src="{{ challan.wide_image_url }}" alt="Wide Traffic View" style="width:100%; display:block; max-height:350px; object-fit:contain; background:#000;">
+        {% else %}
+          <div style="padding:30px; text-align:center; color:var(--text-muted); font-style:italic;">
+            No wide-view image available for this challan.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="gov-section">
+      <div class="gov-section-header">Number Plate OCR Crop</div>
+      <div class="gov-section-body">
+        {% if challan.plate_image_url %}
+          <img src="{{ challan.plate_image_url }}" alt="Plate OCR Crop" style="width:100%; display:block; max-height:200px; object-fit:contain; background:#000;">
+          <div style="padding:10px 16px;">
+            <span class="text-muted font-sm">OCR Extracted Plate Number:&nbsp;</span>
+            <strong class="font-mono" style="font-size:18px; color:var(--navy);">{{ challan.plate_number }}</strong>
+          </div>
+        {% else %}
+          <div style="padding:30px; text-align:center; color:var(--text-muted); font-style:italic;">
+            No plate image available. OCR may not have been triggered for this record.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Notice -->
+    <div style="background:var(--warning-bg); border:1px solid #D4AA66; padding:12px 14px; font-size:12px; color:var(--warning);">
+      <strong>Note for Officers:</strong> Updating status to "Paid" will automatically record the payment timestamp.
+      Status changes are logged and cannot be reversed without a supervisor override.
+    </div>
+
+  </div><!-- /col-half -->
+
+</div><!-- /row -->
+
+{% endblock %}

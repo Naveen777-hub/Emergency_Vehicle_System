@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}My Dashboard — EVPS Citizen Portal{% endblock %}
+
+{% block breadcrumb %}
+<div class="gov-breadcrumb">
+  <div class="bc-inner">
+    Home <span class="bc-sep">/</span>
+    <span class="bc-current">My Dashboard</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<!-- Welcome Banner -->
+<div style="background: var(--navy); color: var(--white); padding: 16px 20px; margin-bottom: 20px; border-left: 5px solid var(--saffron);">
+  <div style="font-size:12px; color:#AACCFF; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">
+    Welcome back to the EVPS Citizen Portal
+  </div>
+  <div style="font-size:20px; font-weight:700;">{{ current_user.full_name }}</div>
+  <div style="font-size:12px; color:#AACCFF; margin-top:3px;">
+    Registered Vehicle Owner &nbsp;|&nbsp; Account: {{ current_user.username }}
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label">Total Challans</div>
+    <div class="stat-value">{{ stats.total }}</div>
+    <div class="stat-sub">All time</div>
+  </div>
+  <div class="stat-card accent-red">
+    <div class="stat-label">Pending Challans</div>
+    <div class="stat-value">{{ stats.pending }}</div>
+    <div class="stat-sub">Awaiting payment</div>
+  </div>
+  <div class="stat-card accent-green">
+    <div class="stat-label">Paid Challans</div>
+    <div class="stat-value">{{ stats.paid }}</div>
+    <div class="stat-sub">Cleared records</div>
+  </div>
+  <div class="stat-card accent-saffron">
+    <div class="stat-label">Amount Outstanding</div>
+    <div class="stat-value" style="font-size:22px;">Rs. {{ "%.2f"|format(stats.amount_due) }}</div>
+    <div class="stat-sub">Pending payment due</div>
+  </div>
+</div>
+
+<!-- Registered Vehicles -->
+<div class="gov-section">
+  <div class="gov-section-header">My Registered Vehicles</div>
+  <div class="gov-section-body">
+    {% if vehicles %}
+    <table class="gov-table">
+      <thead>
+        <tr>
+          <th>S.No.</th>
+          <th>Registration Number</th>
+          <th>Vehicle Type</th>
+          <th>Registered Owner</th>
+          <th>Total Challans</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in vehicles %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td class="fw-bold font-mono" style="font-size:16px;">{{ v.plate_number }}</td>
+          <td>{{ v.vehicle_type or '—' }}</td>
+          <td>{{ v.owner_name or current_user.full_name }}</td>
+          <td>
+            {% set vc = v.challans.count() %}
+            {% if vc > 0 %}
+              <span class="badge badge-challan">{{ vc }} Challan{{ 's' if vc > 1 else '' }}</span>
+            {% else %}
+              <span class="text-muted font-sm">No challans</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="padding: 24px; text-align: center; color: var(--text-muted);">
+      <p>No vehicles are currently linked to your account.</p>
+      <p class="font-sm">Please contact the administration at <strong>helpdesk@evps.gov.in</strong> to register your vehicle and link it to your account.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Challan History -->
+<div class="gov-section">
+  <div class="gov-section-header">
+    <span>Challan History</span>
+    <a href="{{ url_for('user.my_challans') }}">View All</a>
+  </div>
+  <div class="gov-section-body">
+
+    {% if challans %}
+    <table class="gov-table">
+      <thead>
+        <tr>
+          <th>S.No.</th>
+          <th>Challan Number</th>
+          <th>Vehicle Plate</th>
+          <th>Date of Issue</th>
+          <th>Amount (Rs.)</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in challans[:10] %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td class="font-mono" style="font-size:11px;">{{ c.challan_number }}</td>
+          <td class="fw-bold">{{ c.plate_number }}</td>
+          <td style="font-size:12px; white-space:nowrap;">{{ c.created_at.strftime('%d %b %Y, %H:%M') }}</td>
+          <td>{{ "%.2f"|format(c.amount) }}</td>
+          <td><span class="badge badge-{{ c.status|lower }}">{{ c.status }}</span></td>
+          <td style="white-space:nowrap;">
+            <a href="{{ url_for('user.challan_detail', cid=c.id) }}" class="btn btn-sm btn-secondary">View</a>
+            <a href="{{ url_for('user.download_receipt', cid=c.id) }}" class="btn btn-sm btn-primary">Download Receipt</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if challans|length > 10 %}
+    <div style="padding:10px 16px; background:#F6F8FA; border-top:1px solid var(--border); font-size:12px; color:var(--text-muted);">
+      Showing 10 of {{ challans|length }} challans.
+      <a href="{{ url_for('user.my_challans') }}" style="margin-left:6px;">View all challan records</a>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div style="padding:24px; text-align:center; color:var(--text-muted);">
+      <p>No challans found for your registered vehicles.</p>
+      {% if not vehicles %}
+      <p class="font-sm">Note: No vehicles are linked to your account yet. Please contact the administration.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+<!-- Help Notice -->
+<div style="background:var(--info-bg); border:1px solid #80AACE; padding:12px 16px; font-size:12px; color:var(--info);">
+  <strong>For disputes and payment issues:</strong> Please contact your nearest Regional Transport Office or write to
+  <a href="mailto:helpdesk@evps.gov.in">helpdesk@evps.gov.in</a>. Quote your Challan Number in all correspondence.
+  Disputes must be filed within 15 days of the challan issue date.
+</div>
+
+{% endblock %}

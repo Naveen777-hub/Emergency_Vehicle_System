@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard — EVPS{% endblock %}
+
+{% block breadcrumb %}
+<div class="gov-breadcrumb">
+  <div class="bc-inner">
+    Home <span class="bc-sep">/</span>
+    <span class="bc-current">Administration Dashboard</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<!-- Page Title -->
+<div class="page-title-bar">
+  <div>
+    <h1>Administration Dashboard</h1>
+    <p class="page-desc">System overview, enforcement statistics, and live IoT telemetry.</p>
+  </div>
+  <div>
+    <span class="text-muted font-sm">{{ current_date }}</span>
+  </div>
+</div>
+
+<!-- Stat Cards -->
+<div class="stat-grid">
+  <div class="stat-card accent-saffron">
+    <div class="stat-label">Challans Today</div>
+    <div class="stat-value">{{ stats.today_challans }}</div>
+    <div class="stat-sub">Since 00:00 hrs</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Challans This Month</div>
+    <div class="stat-value">{{ stats.month_challans }}</div>
+    <div class="stat-sub">Current calendar month</div>
+  </div>
+  <div class="stat-card accent-red">
+    <div class="stat-label">Pending Challans</div>
+    <div class="stat-value">{{ stats.pending_challans }}</div>
+    <div class="stat-sub">Awaiting payment / disposal</div>
+  </div>
+  <div class="stat-card accent-green">
+    <div class="stat-label">Total Challans</div>
+    <div class="stat-value">{{ stats.total_challans }}</div>
+    <div class="stat-sub">All-time enforcement actions</div>
+  </div>
+  <div class="stat-card accent-info">
+    <div class="stat-label">Registered Vehicles</div>
+    <div class="stat-value">{{ stats.total_vehicles }}</div>
+    <div class="stat-sub">In vehicle registry</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Citizen Users</div>
+    <div class="stat-value">{{ stats.total_users }}</div>
+    <div class="stat-sub">Registered vehicle owners</div>
+  </div>
+</div>
+
+<!-- Live IoT Monitor (inline summary) -->
+<div class="gov-section">
+  <div class="gov-section-header">
+    <span><span class="live-dot" id="live-indicator"></span> Live IoT Monitor — Raspberry Pi Feed</span>
+    <a href="{{ url_for('admin.live_monitor') }}">Open Full Monitor</a>
+  </div>
+  <div class="gov-section-body">
+
+    <div id="iot-waiting" style="padding:18px; text-align:center; color:var(--text-muted);">
+      <div class="spinner" style="margin-bottom:10px;"></div>
+      Waiting for telemetry from the edge device...
+    </div>
+
+    <div id="iot-panel" class="d-none">
+      <div class="iot-metric-row">
+        <div class="iot-metric">
+          <div class="iot-label">System Action</div>
+          <div class="iot-value" id="m-action">--</div>
+        </div>
+        <div class="iot-metric">
+          <div class="iot-label">Traffic Density</div>
+          <div class="iot-value" id="m-density">--</div>
+        </div>
+        <div class="iot-metric">
+          <div class="iot-label">Free Space</div>
+          <div class="iot-value" id="m-space">--</div>
+        </div>
+        <div class="iot-metric">
+          <div class="iot-label">Last Updated</div>
+          <div class="iot-value" id="m-time" style="font-size:14px;">--</div>
+        </div>
+      </div>
+      <div class="iot-log-bar">
+        <strong>Decision Log:</strong> <span id="m-status">--</span>
+      </div>
+      <div class="iot-images-grid">
+        <div class="img-viewer">
+          <div class="img-label">Wide Traffic View (Uploaded Camera Feed)</div>
+          <div class="img-placeholder" id="wide-placeholder">No image received yet.</div>
+          <img id="img-wide" src="" alt="Wide Camera Feed" style="display:none;">
+        </div>
+        <div class="img-viewer">
+          <div class="img-label">Plate OCR Output</div>
+          <div class="img-placeholder" id="plate-placeholder">No plate image received yet.</div>
+          <img id="img-plate" src="" alt="Plate OCR Image" style="display:none;">
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Recent Challans -->
+<div class="gov-section">
+  <div class="gov-section-header">
+    <span>Recent Enforcement Actions</span>
+    <a href="{{ url_for('admin.challans') }}">View All</a>
+  </div>
+  <div class="gov-section-body">
+    <table class="gov-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Challan No.</th>
+          <th>Plate Number</th>
+          <th>Action</th>
+          <th>Status</th>
+          <th>Amount (Rs.)</th>
+          <th>Date &amp; Time</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if recent_challans %}
+          {% for c in recent_challans %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td class="font-mono" style="font-size:12px;">{{ c.challan_number }}</td>
+            <td class="fw-bold">{{ c.plate_number }}</td>
+            <td>
+              {% if c.action == 'Challan Generated' %}
+                <span class="badge badge-challan">{{ c.action }}</span>
+              {% elif c.action == 'OCR Failed' %}
+                <span class="badge badge-disputed">{{ c.action }}</span>
+              {% else %}
+                {{ c.action }}
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge badge-{{ c.status|lower }}">{{ c.status }}</span>
+            </td>
+            <td>{{ "%.2f"|format(c.amount) }}</td>
+            <td style="white-space:nowrap; font-size:12px;">
+              {{ c.created_at.strftime('%d %b %Y, %H:%M') }}
+            </td>
+            <td>
+              <a href="{{ url_for('admin.challan_detail', cid=c.id) }}" class="btn btn-sm btn-secondary">View</a>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr class="no-data"><td colspan="8">No enforcement actions recorded yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let lastTs = null;
+
+  async function pollIoT() {
+    try {
+      const res  = await fetch('/api/latest');
+      const json = await res.json();
+
+      if (json.timestamp && json.data) {
+        const dot = document.getElementById('live-indicator');
+        dot.classList.add('live');
+
+        if (json.timestamp !== lastTs) {
+          lastTs = json.timestamp;
+          const d = json.data;
+
+          document.getElementById('iot-waiting').classList.add('d-none');
+          document.getElementById('iot-panel').classList.remove('d-none');
+
+          document.getElementById('m-action').textContent  = d.action  || '--';
+          document.getElementById('m-density').textContent = (d.density || 0) + '%';
+          document.getElementById('m-space').textContent   = (d.free_space || 0) + ' px';
+          document.getElementById('m-status').textContent  = d.status  || '--';
+
+          const dt = new Date(json.timestamp * 1000);
+          document.getElementById('m-time').textContent =
+            dt.toLocaleDateString('en-IN') + ' ' + dt.toLocaleTimeString('en-IN');
+
+          if (d.wide_image_url) {
+            const iw = document.getElementById('img-wide');
+            iw.src = d.wide_image_url + '?t=' + Date.now();
+            iw.style.display = 'block';
+            document.getElementById('wide-placeholder').style.display = 'none';
+          }
+          if (d.plate_image_url) {
+            const ip = document.getElementById('img-plate');
+            ip.src = d.plate_image_url + '?t=' + Date.now();
+            ip.style.display = 'block';
+            document.getElementById('plate-placeholder').style.display = 'none';
+          }
+        }
+      }
+    } catch(e) {
+      console.warn('IoT poll error:', e);
+    }
+  }
+
+  setInterval(pollIoT, 2000);
+  pollIoT();
+</script>
+{% endblock %}

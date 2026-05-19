@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Vehicle Registry — EVPS Admin{% endblock %}
+
+{% block breadcrumb %}
+<div class="gov-breadcrumb">
+  <div class="bc-inner">
+    <a href="{{ url_for('admin.dashboard') }}">Dashboard</a>
+    <span class="bc-sep">/</span>
+    <span class="bc-current">Vehicle Registry</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title-bar">
+  <div>
+    <h1>Vehicle Registry</h1>
+    <p class="page-desc">Register vehicles and link them to citizen user accounts to enable challan visibility.</p>
+  </div>
+</div>
+
+<!-- Add Vehicle Form -->
+<div class="gov-section">
+  <div class="gov-section-header">Register New Vehicle</div>
+  <div class="gov-section-body padded">
+    <form method="POST" action="{{ url_for('admin.add_vehicle') }}" class="gov-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="plate_number" class="req">Registration / Plate Number</label>
+          <input type="text" id="plate_number" name="plate_number"
+            placeholder="e.g. MH01AB1234" style="text-transform:uppercase;" required>
+          <span class="field-hint">Enter exactly as it appears on the number plate.</span>
+        </div>
+        <div class="form-group">
+          <label for="vehicle_type">Vehicle Type</label>
+          <select id="vehicle_type" name="vehicle_type">
+            <option value="">-- Select Type --</option>
+            <option value="Car">Car / Passenger Vehicle</option>
+            <option value="Motorcycle">Motorcycle / Two-Wheeler</option>
+            <option value="Bus">Bus / Mini-Bus</option>
+            <option value="Truck">Truck / Heavy Vehicle</option>
+            <option value="Auto">Auto Rickshaw</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="owner_name">Registered Owner Name</label>
+          <input type="text" id="owner_name" name="owner_name" placeholder="Name as per RC Book">
+        </div>
+        <div class="form-group">
+          <label for="user_id">Link to User Account</label>
+          <select id="user_id" name="user_id">
+            <option value="">-- Do not link --</option>
+            {% for u in vehicle_owners %}
+            <option value="{{ u.id }}">{{ u.full_name }} ({{ u.username }})</option>
+            {% endfor %}
+          </select>
+          <span class="field-hint">Vehicle owner can then log in and view challans for this plate.</span>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Register Vehicle</button>
+    </form>
+  </div>
+</div>
+
+<!-- Search -->
+<div class="gov-section">
+  <div class="gov-section-header">Search Vehicle Registry</div>
+  <div class="gov-section-body">
+    <form method="GET" action="{{ url_for('admin.vehicles') }}" class="filter-row">
+      <div class="fg">
+        <label for="f-search">Plate Number / Owner Name</label>
+        <input type="text" id="f-search" name="search" value="{{ search }}" placeholder="Search by plate or owner name">
+      </div>
+      <div class="fg" style="justify-content:flex-end;">
+        <label>&nbsp;</label>
+        <div style="display:flex; gap:6px;">
+          <button type="submit" class="btn btn-primary btn-sm">Search</button>
+          <a href="{{ url_for('admin.vehicles') }}" class="btn btn-secondary btn-sm">Clear</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Vehicle Table -->
+<div class="gov-section">
+  <div class="gov-section-header">
+    <span>Registered Vehicles</span>
+    <span class="badge" style="background:#AACCFF22; border:1px solid #AACCFF; color:#CCDDFF; font-size:11px;">Total: {{ vehicles|length }}</span>
+  </div>
+  <div class="gov-section-body">
+    <table class="gov-table">
+      <thead>
+        <tr>
+          <th>S.No.</th>
+          <th>Plate Number</th>
+          <th>Vehicle Type</th>
+          <th>Registered Owner</th>
+          <th>Linked User Account</th>
+          <th>Registered On</th>
+          <th>Link / Unlink User</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if vehicles %}
+          {% for v in vehicles %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td class="fw-bold font-mono" style="font-size:15px;">{{ v.plate_number }}</td>
+            <td>{{ v.vehicle_type or '—' }}</td>
+            <td>{{ v.owner_name or '—' }}</td>
+            <td>
+              {% if v.user_id and v.owner %}
+                {{ v.owner.full_name }}<br>
+                <span class="text-muted font-sm">({{ v.owner.username }})</span>
+              {% else %}
+                <span class="text-muted font-sm">Not linked</span>
+              {% endif %}
+            </td>
+            <td style="font-size:12px;">{{ v.registered_at.strftime('%d %b %Y') }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('admin.link_vehicle', vid=v.id) }}" style="display:flex; gap:5px; align-items:center; flex-wrap:wrap;">
+                <select name="user_id" style="padding:4px 6px; border:1px solid var(--border-dark); font-size:12px; min-width:150px;">
+                  <option value="">-- Remove Link --</option>
+                  {% for u in vehicle_owners %}
+                  <option value="{{ u.id }}" {% if v.user_id == u.id %}selected{% endif %}>
+                    {{ u.full_name }}
+                  </option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-sm btn-warning">Update</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr class="no-data"><td colspan="7">No vehicles registered yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Login — EVPS Portal{% endblock %}
+
+{% block content %}
+<div class="login-page">
+  <div class="login-box">
+
+    <div class="login-box-head">
+      <!-- Inline emblem -->
+      <svg width="48" height="48" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto 10px;" aria-hidden="true">
+        <circle cx="40" cy="40" r="39" fill="#002244" stroke="#FF6600" stroke-width="2"/>
+        <circle cx="40" cy="40" r="13" fill="none" stroke="#FFD700" stroke-width="1.6"/>
+        <circle cx="40" cy="40" r="2.5" fill="#FFD700"/>
+        <g stroke="#FFD700" stroke-width="0.9">
+          <line x1="40" y1="27" x2="40" y2="53"/><line x1="27" y1="40" x2="53" y2="40"/>
+          <line x1="30.8" y1="30.8" x2="49.2" y2="49.2"/><line x1="49.2" y1="30.8" x2="30.8" y2="49.2"/>
+          <line x1="27.9" y1="35.5" x2="52.1" y2="44.5"/><line x1="44.5" y1="27.9" x2="35.5" y2="52.1"/>
+          <line x1="35.5" y1="27.9" x2="44.5" y2="52.1"/><line x1="52.1" y1="35.5" x2="27.9" y2="44.5"/>
+        </g>
+        <ellipse cx="40" cy="23" rx="6" ry="4.5" fill="#FFD700"/>
+        <rect x="25" y="58" width="30" height="4" rx="1" fill="#FFD700"/>
+        <text x="40" y="73" text-anchor="middle" font-size="4.5" fill="#FFD700" font-family="serif" font-weight="bold">SATYAMEVA JAYATE</text>
+      </svg>
+      <h2>EVPS Citizen Portal</h2>
+      <p>Emergency Vehicle Priority System &mdash; Ministry of Road Transport and Highways</p>
+    </div>
+
+    <div class="login-box-body">
+
+      {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('auth.login') }}" novalidate>
+
+        <div class="gov-form">
+          <div class="form-group">
+            <label for="username" class="req">Username / User ID</label>
+            <input
+              type="text"
+              id="username"
+              name="username"
+              placeholder="Enter your username"
+              autocomplete="username"
+              required
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="password" class="req">Password</label>
+            <input
+              type="password"
+              id="password"
+              name="password"
+              placeholder="Enter your password"
+              autocomplete="current-password"
+              required
+            >
+          </div>
+
+          <div class="form-group" style="margin-top: 20px;">
+            <button type="submit" class="btn btn-primary btn-lg btn-block" id="login-btn">
+              Login to Portal
+            </button>
+          </div>
+        </div>
+
+      </form>
+    </div>
+
+    <div class="login-box-footer">
+      New vehicle owner?
+      <a href="{{ url_for('auth.register') }}" style="color:#FF6600;font-weight:600;">Register here</a>
+      &nbsp;|&nbsp; For account assistance, contact helpdesk@evps.gov.in<br>
+      <span style="font-size:10px; margin-top:4px; display:block;">
+        This portal is reserved for authorised personnel only. Unauthorised access is a punishable offence under the IT Act, 2000.
+      </span>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

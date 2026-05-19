@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}Live IoT Monitor — EVPS Admin{% endblock %}
+
+{% block breadcrumb %}
+<div class="gov-breadcrumb">
+  <div class="bc-inner">
+    <a href="{{ url_for('admin.dashboard') }}">Dashboard</a>
+    <span class="bc-sep">/</span>
+    <span class="bc-current">Live Monitor</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title-bar">
+  <div>
+    <h1>Live IoT Monitor</h1>
+    <p class="page-desc">Real-time telemetry feed from the Raspberry Pi edge device. Updates every 2 seconds.</p>
+  </div>
+  <div>
+    <span class="live-dot" id="live-dot"></span>
+    <span id="live-status-text" class="font-sm text-muted">Connecting...</span>
+  </div>
+</div>
+
+<!-- IoT Panel -->
+<div class="gov-section">
+  <div class="gov-section-header">
+    <span>Edge Device Telemetry — Raspberry Pi Camera Feed</span>
+    <span id="last-update-label" class="font-sm" style="color:#AACCFF;">Waiting for first event...</span>
+  </div>
+  <div class="gov-section-body">
+
+    <div id="waiting-msg" style="padding:30px; text-align:center;">
+      <div class="spinner" style="margin-bottom:12px;"></div>
+      <p class="text-muted">Awaiting telemetry from edge device. Ensure the Raspberry Pi is running and can reach this server.</p>
+    </div>
+
+    <div id="iot-panel" class="d-none">
+      <!-- Metrics Bar -->
+      <div class="iot-metric-row">
+        <div class="iot-metric">
+          <div class="iot-label">System Action</div>
+          <div class="iot-value" id="m-action">--</div>
+        </div>
+        <div class="iot-metric">
+          <div class="iot-label">Traffic Density</div>
+          <div class="iot-value" id="m-density">--</div>
+        </div>
+        <div class="iot-metric">
+          <div class="iot-label">Free Space (px)</div>
+          <div class="iot-value" id="m-space">--</div>
+        </div>
+        <div class="iot-metric">
+          <div class="iot-label">OCR Plate Number</div>
+          <div class="iot-value font-mono" id="m-plate">--</div>
+        </div>
+        <div class="iot-metric">
+          <div class="iot-label">Queue Depth</div>
+          <div class="iot-value" id="m-queue">--</div>
+          <div class="iot-label" style="font-size:10px; margin-top:2px;">frames pending</div>
+        </div>
+      </div>
+
+      <!-- Decision Log -->
+      <div class="iot-log-bar">
+        <strong>Pipeline Decision Log:</strong> <span id="m-status">--</span>
+      </div>
+
+      <!-- Images -->
+      <div class="iot-images-grid">
+        <div class="img-viewer">
+          <div class="img-label">Wide Traffic View — Uploaded Camera Feed</div>
+          <div class="img-placeholder" id="wide-ph">No image received yet.</div>
+          <img id="img-wide" src="" alt="Wide traffic camera feed" style="display:none;">
+        </div>
+        <div class="img-viewer">
+          <div class="img-label">Number Plate Crop — OCR Input</div>
+          <div class="img-placeholder" id="plate-ph">No plate image received yet.</div>
+          <img id="img-plate" src="" alt="Number plate crop" style="display:none;">
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let lastTs = null;
+
+  async function pollIoT() {
+    try {
+      const res  = await fetch('/api/latest');
+      const json = await res.json();
+      const dot  = document.getElementById('live-dot');
+
+      // Always update queue depth (available even before first frame arrives)
+      if (json.queue_depth !== undefined) {
+        const qEl = document.getElementById('m-queue');
+        if (qEl) {
+          qEl.textContent = json.queue_depth;
+          qEl.style.color = json.queue_depth > 20 ? 'var(--danger)'
+                          : json.queue_depth > 5  ? 'var(--saffron)'
+                          : 'var(--gov-green)';
+        }
+      }
+
+      if (json.timestamp && json.data) {
+        dot.classList.add('live');
+        document.getElementById('live-status-text').textContent = 'Connected — Live';
+
+        if (json.timestamp !== lastTs) {
+          lastTs = json.timestamp;
+          const d = json.data;
+
+          document.getElementById('waiting-msg').classList.add('d-none');
+          document.getElementById('iot-panel').classList.remove('d-none');
+
+          document.getElementById('m-action').textContent  = d.action  || '--';
+          document.getElementById('m-density').textContent = (d.density || 0) + '%';
+          document.getElementById('m-space').textContent   = (d.free_space || 0) + ' px';
+          document.getElementById('m-plate').textContent   = d.plate_number || 'N/A';
+          document.getElementById('m-status').textContent  = d.status  || '--';
+
+          const dt = new Date(json.timestamp * 1000);
+          document.getElementById('last-update-label').textContent =
+            'Last event: ' + dt.toLocaleTimeString('en-IN');
+
+          if (d.wide_image_url) {
+            const el = document.getElementById('img-wide');
+            el.src = d.wide_image_url + '?t=' + Date.now();
+            el.style.display = 'block';
+            document.getElementById('wide-ph').style.display = 'none';
+          }
+          if (d.plate_image_url) {
+            const el = document.getElementById('img-plate');
+            el.src = d.plate_image_url + '?t=' + Date.now();
+            el.style.display = 'block';
+            document.getElementById('plate-ph').style.display = 'none';
+          }
+        }
+      } else {
+        dot.classList.remove('live');
+        document.getElementById('live-status-text').textContent = 'No data received yet';
+      }
+    } catch(e) {
+      console.warn('Poll error:', e);
+      document.getElementById('live-dot').classList.remove('live');
+    }
+  }
+
+  setInterval(pollIoT, 2000);
+  pollIoT();
+</script>
+{% endblock %}

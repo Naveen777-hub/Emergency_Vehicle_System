@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Emergency Vehicle Priority System - Government of India, Ministry of Road Transport and Highways">
+  <title>{% block title %}Emergency Vehicle Priority System{% endblock %} | MoRTH</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/gov.css') }}">
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+
+<a href="#main-content" class="skip-link">Skip to Main Content</a>
+
+<!-- ── Top Government Strip ──────────────────────────────────────────────── -->
+<div class="top-strip">
+  <div class="ts-inner">
+    <span>Government of India &nbsp;|&nbsp; Ministry of Road Transport and Highways</span>
+    <span>Last Updated: {{ current_date }} &nbsp;|&nbsp; <a href="https://india.gov.in" target="_blank" rel="noopener">india.gov.in</a></span>
+  </div>
+</div>
+
+<!-- ── Government Portal Header ──────────────────────────────────────────── -->
+<header class="gov-header">
+  <div class="header-inner">
+
+    <!-- National Emblem (stylised SVG) -->
+    <svg class="gov-emblem" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Government of India Emblem">
+      <circle cx="40" cy="40" r="39" fill="#002244" stroke="#FF6600" stroke-width="2"/>
+      <circle cx="40" cy="40" r="34" fill="none" stroke="#FFD700" stroke-width="0.6"/>
+      <!-- Ashoka Chakra at centre -->
+      <circle cx="40" cy="40" r="13" fill="none" stroke="#FFD700" stroke-width="1.6"/>
+      <circle cx="40" cy="40" r="2.5" fill="#FFD700"/>
+      <!-- 24 Spokes -->
+      <g stroke="#FFD700" stroke-width="0.9">
+        <line x1="40" y1="27" x2="40" y2="53"/>
+        <line x1="27" y1="40" x2="53" y2="40"/>
+        <line x1="30.8" y1="30.8" x2="49.2" y2="49.2"/>
+        <line x1="49.2" y1="30.8" x2="30.8" y2="49.2"/>
+        <line x1="27.9" y1="35.5" x2="52.1" y2="44.5"/>
+        <line x1="44.5" y1="27.9" x2="35.5" y2="52.1"/>
+        <line x1="35.5" y1="27.9" x2="44.5" y2="52.1"/>
+        <line x1="52.1" y1="35.5" x2="27.9" y2="44.5"/>
+      </g>
+      <!-- Stylised Lion Capital -->
+      <ellipse cx="40" cy="23" rx="6" ry="4.5" fill="#FFD700"/>
+      <ellipse cx="32" cy="27" rx="5" ry="3" fill="#FFD700" transform="rotate(-25,32,27)"/>
+      <ellipse cx="48" cy="27" rx="5" ry="3" fill="#FFD700" transform="rotate(25,48,27)"/>
+      <!-- Abacus / Platform -->
+      <rect x="25" y="58" width="30" height="4" rx="1" fill="#FFD700"/>
+      <!-- Animals on abacus (dots) -->
+      <circle cx="31" cy="57" r="1.5" fill="#FFD700"/>
+      <circle cx="40" cy="57" r="1.5" fill="#FFD700"/>
+      <circle cx="49" cy="57" r="1.5" fill="#FFD700"/>
+      <!-- Text -->
+      <text x="40" y="73" text-anchor="middle" font-size="4.5" fill="#FFD700" font-family="serif" font-weight="bold" letter-spacing="0.5">SATYAMEVA JAYATE</text>
+    </svg>
+
+    <div class="portal-info">
+      <div class="portal-ministry">Government of India &nbsp;|&nbsp; Ministry of Road Transport and Highways &nbsp;|&nbsp; Road Safety Division</div>
+      <div class="portal-title">Emergency Vehicle Priority System</div>
+      <div class="portal-subtitle">आपातकाल वाहन प्राथमिकता प्रणाली &nbsp;&nbsp;|&nbsp;&nbsp; Intelligent Traffic Enforcement Portal &nbsp;&nbsp;|&nbsp;&nbsp; EVPS v2.0</div>
+    </div>
+
+  </div>
+</header>
+
+<!-- ── Navigation ─────────────────────────────────────────────────────────── -->
+{% if current_user.is_authenticated %}
+<nav class="gov-navbar" role="navigation" aria-label="Main Navigation">
+  <div class="nav-inner">
+
+    {% if current_user.role == 'admin' %}
+      {% set ep = request.endpoint or '' %}
+      <a href="{{ url_for('admin.dashboard') }}"    class="nav-link {% if ep == 'admin.dashboard' %}active{% endif %}">Dashboard</a>
+      <a href="{{ url_for('admin.challans') }}"     class="nav-link {% if 'challan' in ep and ep != 'admin.dashboard' %}active{% endif %}">Challan Management</a>
+      <a href="{{ url_for('admin.users') }}"        class="nav-link {% if 'user' in ep and 'admin' in ep %}active{% endif %}">User Management</a>
+      <a href="{{ url_for('admin.vehicles') }}"     class="nav-link {% if 'vehicle' in ep %}active{% endif %}">Vehicle Registry</a>
+      <a href="{{ url_for('admin.live_monitor') }}" class="nav-link {% if 'live' in ep %}active{% endif %}">Live Monitor</a>
+    {% else %}
+      {% set ep = request.endpoint or '' %}
+      <a href="{{ url_for('user.dashboard') }}"   class="nav-link {% if ep == 'user.dashboard' %}active{% endif %}">My Dashboard</a>
+      <a href="{{ url_for('user.my_challans') }}" class="nav-link {% if 'challan' in ep %}active{% endif %}">My Challans</a>
+    {% endif %}
+
+    <div class="nav-right">
+      <span class="nav-user-info">
+        Logged in as: <strong>{{ current_user.full_name }}</strong><br>
+        <span style="font-size:10px;">{{ 'Administrator' if current_user.role == 'admin' else 'Vehicle Owner' }}</span>
+      </span>
+      <a href="{{ url_for('auth.logout') }}" class="nav-logout">Logout</a>
+    </div>
+
+  </div>
+</nav>
+{% endif %}
+
+<!-- ── Breadcrumb ─────────────────────────────────────────────────────────── -->
+{% block breadcrumb %}{% endblock %}
+
+<!-- ── Flash Messages ────────────────────────────────────────────────────── -->
+<div class="flash-zone">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div style="padding-top: 10px;">
+        {% for cat, msg in messages %}
+          <div class="alert alert-{{ cat }}">{{ msg }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+</div>
+
+<!-- ── Main Content ───────────────────────────────────────────────────────── -->
+<main id="main-content" class="gov-main">
+  {% block content %}{% endblock %}
+</main>
+
+<!-- ── Footer ────────────────────────────────────────────────────────────── -->
+<footer class="gov-footer" role="contentinfo">
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>Ministry of Road Transport</h4>
+      <p>Road Safety and Enforcement Division<br>Government of India<br>New Delhi - 110001</p>
+    </div>
+    <div class="footer-col">
+      <h4>Important Links</h4>
+      <p>
+        <a href="https://morth.nic.in" target="_blank" rel="noopener">MoRTH Official Portal</a><br>
+        <a href="https://india.gov.in" target="_blank" rel="noopener">National Portal of India</a><br>
+        <a href="https://parivahan.gov.in" target="_blank" rel="noopener">Parivahan Sewa</a>
+      </p>
+    </div>
+    <div class="footer-col">
+      <h4>System Information</h4>
+      <p>
+        EVPS Version: 2.0<br>
+        Architecture: Edge-Cloud AI Pipeline<br>
+        Model: EasyOCR (Edge AI)
+      </p>
+    </div>
+    <div class="footer-col">
+      <h4>Helpdesk</h4>
+      <p>
+        Toll Free: 1800-000-0000<br>
+        Email: helpdesk@evps.gov.in<br>
+        Hours: 09:00 - 18:00 (Mon-Sat)
+      </p>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>Copyright &copy; {{ current_year }} Government of India. All Rights Reserved.</span>
+    <span>Content owned and maintained by Ministry of Road Transport and Highways.</span>
+  </div>
+</footer>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

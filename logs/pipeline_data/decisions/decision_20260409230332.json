@@ -1,0 +1,11 @@
+{
+    "timestamp": "2026-04-09 23:03:32.556060",
+    "status": "No vehicles detected in front. Ignoring case.",
+    "action": "Ignore",
+    "metrics": {
+        "density": "0.00",
+        "free_space_pixels": 0,
+        "rssi_value": -65
+    },
+    "plate_number": null
+}

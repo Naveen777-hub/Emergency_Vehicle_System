@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Add New User — EVPS Admin{% endblock %}
+
+{% block breadcrumb %}
+<div class="gov-breadcrumb">
+  <div class="bc-inner">
+    <a href="{{ url_for('admin.dashboard') }}">Dashboard</a>
+    <span class="bc-sep">/</span>
+    <a href="{{ url_for('admin.users') }}">User Management</a>
+    <span class="bc-sep">/</span>
+    <span class="bc-current">Add New User</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title-bar">
+  <div>
+    <h1>Add New User Account</h1>
+    <p class="page-desc">Create a login account for a new administrator or vehicle owner.</p>
+  </div>
+  <a href="{{ url_for('admin.users') }}" class="btn btn-secondary">Back to User List</a>
+</div>
+
+<div style="max-width: 700px;">
+  <div class="gov-section">
+    <div class="gov-section-header">New User Registration Form</div>
+    <div class="gov-section-body padded">
+
+      <form method="POST" action="{{ url_for('admin.add_user') }}" class="gov-form" novalidate>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="full_name" class="req">Full Name</label>
+            <input type="text" id="full_name" name="full_name"
+              value="{{ form_data.get('full_name', '') }}"
+              placeholder="As per official documents" required>
+          </div>
+          <div class="form-group">
+            <label for="username" class="req">Username / User ID</label>
+            <input type="text" id="username" name="username"
+              value="{{ form_data.get('username', '') }}"
+              placeholder="Login identifier (no spaces)" required>
+            <span class="field-hint">Must be unique. Example: dnyan_sharma or MH01AB1234</span>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" name="email"
+              value="{{ form_data.get('email', '') }}"
+              placeholder="example@domain.com">
+          </div>
+          <div class="form-group">
+            <label for="phone">Mobile Number</label>
+            <input type="tel" id="phone" name="phone"
+              value="{{ form_data.get('phone', '') }}"
+              placeholder="10-digit mobile number">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="password" class="req">Password</label>
+            <input type="password" id="password" name="password"
+              placeholder="Minimum 6 characters" required>
+          </div>
+          <div class="form-group">
+            <label for="confirm_password" class="req">Confirm Password</label>
+            <input type="password" id="confirm_password" name="confirm_password"
+              placeholder="Re-enter password" required>
+          </div>
+        </div>
+
+        <div class="form-group" style="max-width: 320px;">
+          <label for="role" class="req">User Role</label>
+          <select id="role" name="role">
+            <option value="vehicle_owner" {% if form_data.get('role','vehicle_owner') == 'vehicle_owner' %}selected{% endif %}>Vehicle Owner (Citizen)</option>
+            <option value="admin" {% if form_data.get('role') == 'admin' %}selected{% endif %}>Administrator</option>
+          </select>
+          <span class="field-hint">Vehicle Owners can view their own challans only. Administrators have full system access.</span>
+        </div>
+
+        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); display:flex; gap:10px;">
+          <button type="submit" class="btn btn-primary">Create User Account</button>
+          <a href="{{ url_for('admin.users') }}" class="btn btn-secondary">Cancel</a>
+        </div>
+
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

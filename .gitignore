@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
+
+# Environment variables
+.env
+
+# Database (local SQLite — NOT for production)
+data/evs.db
+data/*.db
+
+# Uploaded images (ephemeral — not tracked in git)
+static/uploads/*.jpg
+static/uploads/*.png
+static/uploads/*.jpeg
+
+# AI model weights (large binary files — download separately)
+models/*.pt
+models/*.onnx
+
+# Render / deployment
+*.log
+.render-build-dir/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

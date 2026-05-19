@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}My Challans — EVPS Citizen Portal{% endblock %}
+
+{% block breadcrumb %}
+<div class="gov-breadcrumb">
+  <div class="bc-inner">
+    <a href="{{ url_for('user.dashboard') }}">My Dashboard</a>
+    <span class="bc-sep">/</span>
+    <span class="bc-current">My Challans</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title-bar">
+  <div>
+    <h1>My Challan Records</h1>
+    <p class="page-desc">Complete history of traffic violation challans issued against your registered vehicles.</p>
+  </div>
+</div>
+
+<div class="gov-section">
+  <div class="gov-section-header">
+    <span>All Challans</span>
+    <span class="badge" style="background:#AACCFF22; border:1px solid #AACCFF; color:#CCDDFF; font-size:11px;">Total: {{ challans|length }}</span>
+  </div>
+  <div class="gov-section-body">
+    {% if challans %}
+    <table class="gov-table">
+      <thead>
+        <tr>
+          <th>S.No.</th>
+          <th>Challan Number</th>
+          <th>Vehicle Plate</th>
+          <th>Date of Issue</th>
+          <th>Amount (Rs.)</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in challans %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td class="font-mono" style="font-size:11px;">{{ c.challan_number }}</td>
+          <td class="fw-bold">{{ c.plate_number }}</td>
+          <td style="font-size:12px; white-space:nowrap;">{{ c.created_at.strftime('%d %b %Y, %H:%M') }}</td>
+          <td>{{ "%.2f"|format(c.amount) }}</td>
+          <td><span class="badge badge-{{ c.status|lower }}">{{ c.status }}</span></td>
+          <td style="white-space:nowrap;">
+            <a href="{{ url_for('user.challan_detail', cid=c.id) }}" class="btn btn-sm btn-secondary">View Detail</a>
+            <a href="{{ url_for('user.download_receipt', cid=c.id) }}" class="btn btn-sm btn-primary">Download Receipt</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="padding:30px; text-align:center; color:var(--text-muted);">
+      No challans found for your registered vehicles.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

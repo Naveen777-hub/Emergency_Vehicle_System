@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}Challan {{ challan.challan_number }} — EVPS Citizen Portal{% endblock %}
+
+{% block breadcrumb %}
+<div class="gov-breadcrumb">
+  <div class="bc-inner">
+    <a href="{{ url_for('user.dashboard') }}">My Dashboard</a>
+    <span class="bc-sep">/</span>
+    <a href="{{ url_for('user.my_challans') }}">My Challans</a>
+    <span class="bc-sep">/</span>
+    <span class="bc-current">{{ challan.challan_number }}</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title-bar">
+  <div>
+    <h1>Challan Detail</h1>
+    <p class="page-desc">Challan Reference: <strong class="font-mono">{{ challan.challan_number }}</strong></p>
+  </div>
+  <div class="d-flex gap-1 align-center">
+    <span class="badge badge-{{ challan.status|lower }}" style="font-size:13px; padding:4px 12px;">{{ challan.status }}</span>
+    <a href="{{ url_for('user.download_receipt', cid=challan.id) }}" class="btn btn-primary">Download Official Receipt (PDF)</a>
+    <a href="{{ url_for('user.my_challans') }}" class="btn btn-secondary">Back</a>
+  </div>
+</div>
+
+<!-- Payment status notice -->
+{% if challan.status == 'Pending' %}
+<div class="alert alert-warning" style="border-left: 4px solid #D4A500;">
+  <strong>Payment Required:</strong> This challan has an outstanding amount of <strong>Rs. {{ "%.2f"|format(challan.amount) }}</strong>.
+  Please pay at your nearest Regional Transport Office or authorised payment centre.
+  Quote Challan Number <strong>{{ challan.challan_number }}</strong> in all communications.
+</div>
+{% elif challan.status == 'Paid' %}
+<div class="alert alert-success" style="border-left: 4px solid var(--gov-green);">
+  <strong>Payment Confirmed:</strong> This challan has been paid on {{ challan.paid_at.strftime('%d %B %Y at %H:%M') if challan.paid_at else 'record date' }}.
+  You may download your official receipt using the button above.
+</div>
+{% elif challan.status == 'Disputed' %}
+<div class="alert alert-danger" style="border-left: 4px solid var(--danger);">
+  <strong>Under Dispute:</strong> This challan has been marked as disputed. Your case is currently under review by the enforcement authority.
+  For status updates, contact helpdesk@evps.gov.in.
+</div>
+{% endif %}
+
+<div class="row">
+
+  <div class="col-half">
+
+    <!-- Challan Info -->
+    <div class="gov-section">
+      <div class="gov-section-header">Challan Information</div>
+      <div class="gov-section-body">
+        <table class="detail-table">
+          <tr><td class="dt-label">Challan Number</td><td class="font-mono fw-bold">{{ challan.challan_number }}</td></tr>
+          <tr><td class="dt-label">Date of Issue</td><td>{{ challan.created_at.strftime('%d %B %Y') }}</td></tr>
+          <tr><td class="dt-label">Time of Detection</td><td>{{ challan.created_at.strftime('%H:%M:%S') }}</td></tr>
+          <tr><td class="dt-label">Current Status</td><td><span class="badge badge-{{ challan.status|lower }}">{{ challan.status }}</span></td></tr>
+          <tr><td class="dt-label">Fine Amount</td><td class="fw-bold" style="font-size:18px; color:var(--navy);">Rs. {{ "%.2f"|format(challan.amount) }}</td></tr>
+          <tr>
+            <td class="dt-label">Payment Date</td>
+            <td>{{ challan.paid_at.strftime('%d %B %Y, %H:%M') if challan.paid_at else 'Not yet paid' }}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Vehicle Details -->
+    <div class="gov-section">
+      <div class="gov-section-header">Vehicle Details</div>
+      <div class="gov-section-body">
+        <table class="detail-table">
+          <tr><td class="dt-label">Registration Number</td>
+              <td class="fw-bold font-mono" style="font-size:18px;">{{ challan.plate_number }}</td></tr>
+          <tr><td class="dt-label">Vehicle Type</td>
+              <td>{{ vehicle.vehicle_type if vehicle else 'Data not available' }}</td></tr>
+          <tr><td class="dt-label">Registered Owner</td>
+              <td>{{ vehicle.owner_name if vehicle else 'Data not available' }}</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Violation Details -->
+    <div class="gov-section">
+      <div class="gov-section-header">Violation Details</div>
+      <div class="gov-section-body">
+        <table class="detail-table">
+          <tr><td class="dt-label">Offence</td><td>Failure to yield right-of-way to an emergency vehicle (MV Act Sec. 194B)</td></tr>
+          <tr><td class="dt-label">System Action</td><td>
+            {% if challan.action == 'Challan Generated' %}
+              <span class="badge badge-challan">{{ challan.action }}</span>
+            {% else %}
+              {{ challan.action }}
+            {% endif %}
+          </td></tr>
+          <tr><td class="dt-label">Traffic Density</td><td>{{ "%.1f"|format(challan.density_pct) }}%</td></tr>
+          <tr><td class="dt-label">Free Space</td><td>{{ challan.free_space_px }} pixels</td></tr>
+          <tr><td class="dt-label">Detection System</td><td>EasyOCR AI Pipeline (Raspberry Pi)</td></tr>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /col-half -->
+
+  <!-- Right: Images -->
+  <div class="col-half">
+
+    <div class="gov-section">
+      <div class="gov-section-header">Traffic Detection Image</div>
+      <div class="gov-section-body">
+        {% if challan.wide_image_url %}
+          <img src="{{ challan.wide_image_url }}" alt="Traffic Detection Image"
+               style="width:100%; display:block; max-height:320px; object-fit:contain; background:#000;">
+        {% else %}
+          <div style="padding:30px; text-align:center; color:var(--text-muted); font-style:italic;">
+            Traffic detection image is not available for this record.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="gov-section">
+      <div class="gov-section-header">Number Plate Evidence</div>
+      <div class="gov-section-body">
+        {% if challan.plate_image_url %}
+          <img src="{{ challan.plate_image_url }}" alt="Number Plate OCR"
+               style="width:100%; display:block; max-height:180px; object-fit:contain; background:#000;">
+          <div style="padding:10px 16px; font-size:12px;">
+            Detected Registration: <strong class="font-mono" style="font-size:16px;">{{ challan.plate_number }}</strong>
+          </div>
+        {% else %}
+          <div style="padding:30px; text-align:center; color:var(--text-muted); font-style:italic;">
+            Plate crop image not available.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Download Section -->
+    <div style="background:var(--off-white); border:1px solid var(--border); padding:16px;">
+      <h4 style="font-size:14px; margin-bottom:8px;">Official Challan Receipt</h4>
+      <p class="font-sm text-muted" style="margin-bottom:12px;">
+        Download the official e-challan receipt in PDF format for your records. This document is legally valid
+        and can be presented at any Regional Transport Office.
+      </p>
+      <a href="{{ url_for('user.download_receipt', cid=challan.id) }}" class="btn btn-primary btn-block">
+        Download PDF Receipt
+      </a>
+    </div>
+
+  </div><!-- /col-half -->
+
+</div>
+
+<!-- Legal Notice -->
+<div style="background:var(--warning-bg); border:1px solid #D4AA66; padding:12px 16px; font-size:12px; color:var(--warning); margin-top:8px;">
+  <strong>Legal Notice:</strong> Non-payment of fine within 30 days of the issue date may result in suspension of
+  vehicle registration and further legal proceedings under the Motor Vehicles Act, 1988. For dispute filing,
+  submit a written representation at your nearest RTO within 15 days.
+</div>
+
+{% endblock %}

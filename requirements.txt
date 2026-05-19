@@ -1,0 +1,29 @@
+# Emergency Vehicle Priority System — Backend Dependencies
+# Render free tier optimized (512MB RAM)
+# All versions PINNED to prevent heavy auto-upgrades
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+flask==3.0.2
+flask-login==0.6.3
+flask-sqlalchemy==3.1.1
+werkzeug==3.0.1
+
+# ── WSGI server ───────────────────────────────────────────────────────────────
+gunicorn==21.2.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+psycopg2-binary==2.9.9
+
+# ── Image processing ──────────────────────────────────────────────────────────
+# Headless OpenCV — no GUI, smaller footprint
+opencv-python-headless==4.8.1.78
+numpy==1.26.3
+
+# ── OCR (lazy-loaded on first request, not at startup) ──────────────────────
+easyocr==1.7.0
+
+# ── PDF generation ────────────────────────────────────────────────────────────
+reportlab==4.0.9
+
+# ── Pillow (transitive dep, pin to lean version) ──────────────────────────────
+Pillow==10.1.0
