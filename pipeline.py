@@ -4,7 +4,7 @@ Cloud-side OCR pipeline (v5 — Render Free Tier Optimized).
 
 Key changes from v4:
   - Removed YOLOv8 / ultralytics completely (was using 300MB+ RAM).
-  - EasyOCR runs directly on the full uploaded image.
+  - EasyOCR runs on the saved JPEG file (more reliable than raw array).
   - OCR reader is LAZY-LOADED on first request (not at startup).
   - Startup RAM: ~50MB. OCR RAM: ~300MB (loaded only when first image arrives).
   - Render free tier (512MB) can handle this comfortably.
@@ -26,13 +26,9 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 # ── Lazy OCR loader ───────────────────────────────────────────────────────────
-_ocr_reader = None  # Not loaded at startup — loaded on first request
+_ocr_reader = None
 
 def _get_ocr_reader():
-    """
-    Returns a shared EasyOCR reader instance.
-    Loads it on first call (lazy loading) to keep startup RAM low.
-    """
     global _ocr_reader
     if _ocr_reader is None:
         import easyocr
@@ -42,15 +38,16 @@ def _get_ocr_reader():
     return _ocr_reader
 
 
-# ── OCR on full image ─────────────────────────────────────────────────────────
-def _read_plate(image_np: np.ndarray) -> str | None:
+# ── OCR on saved image file ──────────────────────────────────────────────────
+def _read_plate(image_path: str) -> str | None:
     """
-    Run EasyOCR on the full uploaded image.
-    Passes the raw BGR image directly (EasyOCR handles its own preprocessing).
-    Single-channel images cause 'model does not support image input' errors.
+    Run EasyOCR on a saved image file path.
+    Using a file path is more reliable than passing numpy arrays,
+    which can trigger 'model does not support image input' errors
+    with certain EasyOCR/PyTorch versions.
     """
     reader     = _get_ocr_reader()
-    ocr_result = reader.readtext(image_np)
+    ocr_result = reader.readtext(image_path)
 
     candidates = []
     for _bbox, text, score in ocr_result:
@@ -70,7 +67,7 @@ class OCRPipeline:
     """
     Minimal cloud pipeline:
       1. Save uploaded image to static/uploads/.
-      2. Run EasyOCR on the image.
+      2. Run EasyOCR on the saved file (not raw array).
       3. Return structured result for challan generation.
     No YOLO. No ultralytics. No torch. Just EasyOCR + OpenCV.
     """
@@ -91,7 +88,6 @@ class OCRPipeline:
         wide_path  = os.path.join(UPLOAD_DIR, wide_fname)
         wide_url   = f"/static/uploads/{wide_fname}"
 
-        # Save raw uploaded image
         cv2.imwrite(wide_path, image_np)
         logger.info("Saved uploaded frame → %s", wide_path)
 
@@ -101,7 +97,7 @@ class OCRPipeline:
         decision_status = f"Traffic: {traffic_level}. Running OCR on uploaded image."
 
         try:
-            plate_text = _read_plate(image_np)
+            plate_text = _read_plate(wide_path)
 
             if plate_text:
                 action      = "Challan Generated"
@@ -131,12 +127,10 @@ class OCRPipeline:
             "wide_image_url":  wide_url,
             "plate_image_url": plate_url,
             "traffic_level":   traffic_level,
-            # Legacy fields kept for DB column compatibility
             "density":         0.0,
             "free_space":      0,
         }
 
 
 # ── Global singleton ──────────────────────────────────────────────────────────
-# Lightweight at startup — OCR loads lazily on first /api/upload request.
 pipeline_engine = OCRPipeline()

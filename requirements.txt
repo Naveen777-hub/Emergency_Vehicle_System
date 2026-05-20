@@ -20,7 +20,7 @@ opencv-python-headless==4.8.1.78
 numpy==1.26.3
 
 # ── OCR (lazy-loaded on first request, not at startup) ──────────────────────
-easyocr==1.7.0
+easyocr==1.7.2
 
 # ── PDF generation ────────────────────────────────────────────────────────────
 reportlab==4.0.9
