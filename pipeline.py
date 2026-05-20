@@ -2,9 +2,10 @@
 pipeline.py
 Cloud-side OCR pipeline — Render Free Tier Optimized.
 
-- EasyOCR initialized ONCE at module load (not lazy, not inside request handlers).
+- EasyOCR initialized EXPLICITLY via init_ocr(), NOT at module import time.
+  This keeps import-time memory low so Render's 512MB free tier doesn't OOM.
+- Call pipeline_engine.init_ocr() from app startup to warm up OCR eagerly.
 - OCR runs on in-memory numpy array (no filesystem dependency), falls back to file path.
-- No extra threads — relies on gunicorn --timeout for worker-level timeout safety.
 - gc.collect() after each OCR run to keep memory low.
 - No YOLO. No ultralytics. No torch on cloud.
 """
@@ -23,11 +24,25 @@ BASE_DIR   = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ── Global OCR reader (initialized ONCE at import, reused for all requests) ──
-import easyocr
-logger.info("Loading EasyOCR reader (CPU)...")
-_ocr_reader = easyocr.Reader(["en"], gpu=False)
-logger.info("EasyOCR reader ready.")
+# ── OCR reader (lazily initialized; call init_ocr() to warm up) ──
+_ocr_reader = None
+
+
+def init_ocr():
+    """Initialize the global EasyOCR reader. Call once at app startup."""
+    global _ocr_reader
+    if _ocr_reader is not None:
+        return
+    import easyocr
+    logger.info("Loading EasyOCR reader (CPU)...")
+    _ocr_reader = easyocr.Reader(["en"], gpu=False)
+    logger.info("EasyOCR reader ready.")
+
+
+def _ensure_ocr():
+    """Ensure OCR is initialized (lazy fallback if init_ocr() wasn't called)."""
+    if _ocr_reader is None:
+        init_ocr()
 
 
 def _read_plate(image_np: np.ndarray, image_path: str | None = None) -> str | None:
@@ -35,6 +50,8 @@ def _read_plate(image_np: np.ndarray, image_path: str | None = None) -> str | No
     Run EasyOCR on a numpy array (in-memory), falling back to file path.
     Runs synchronously — no extra thread pools (avoids memory overhead).
     """
+    _ensure_ocr()
+
     result = None
 
     # Strategy 1: numpy array directly (no filesystem dependency)
@@ -76,6 +93,10 @@ class OCRPipeline:
       2. Run EasyOCR on the saved file.
       3. Return structured result for challan generation.
     """
+
+    def init_ocr(self):
+        """Warm up EasyOCR. Call at app startup."""
+        init_ocr()
 
     def process_upload(self, image_np: np.ndarray, traffic_level: str = "UNKNOWN") -> dict:
         timestamp  = datetime.now().strftime("%Y%m%d%H%M%S")

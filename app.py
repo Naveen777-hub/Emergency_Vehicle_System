@@ -5,7 +5,8 @@ Flask application entry point — Render Free Tier Optimized.
 Architecture:
   - Raspberry Pi runs traffic detection (YOLOv8n ONNX) locally.
   - Pi uploads images ONLY for LOW/MEDIUM traffic.
-  - Cloud backend: EasyOCR (loaded ONCE at startup) → challan DB → dashboard.
+  - Cloud backend: EasyOCR (initialized after import to keep startup RAM low)
+                  → challan DB → dashboard.
   - /api/upload accepts image + traffic_level, runs OCR, saves challan.
   - Render-ready: SECRET_KEY / DATABASE_URL from env vars.
   - SQLite local / PostgreSQL on Render.
@@ -125,23 +126,36 @@ def _ensure_database():
         db.session.commit()
 
 _db_ready = False
+_ocr_ready = False
 try:
     _ensure_database()
     _db_ready = True
 except Exception as exc:
     logger.warning("Database init deferred (will retry on first request): %s", exc)
 
+try:
+    pipeline_engine.init_ocr()
+    _ocr_ready = True
+except Exception as exc:
+    logger.warning("OCR init deferred (will init on first OCR request): %s", exc)
+
 
 @app.before_request
-def _ensure_db_on_request():
-    """Retry database init on first request if it was deferred at startup."""
-    global _db_ready
+def _ensure_db_and_ocr_on_request():
+    """Retry database and OCR init on first request if deferred at startup."""
+    global _db_ready, _ocr_ready
     if not _db_ready:
         try:
             _ensure_database()
             _db_ready = True
         except Exception as exc:
             logger.error("Database still unavailable: %s", exc)
+    if not _ocr_ready:
+        try:
+            pipeline_engine.init_ocr()
+            _ocr_ready = True
+        except Exception as exc:
+            logger.warning("OCR still unavailable: %s", exc)
 
 
 login_manager = LoginManager()
@@ -205,7 +219,7 @@ def process_pipeline():
 
     This endpoint:
       1. Reads + decodes image.
-      2. Runs EasyOCR (already loaded at startup, no lazy init delay).
+      2. Runs EasyOCR (initialized at startup, not inside request handlers).
       3. Saves challan to database.
       4. Returns result JSON.
 
