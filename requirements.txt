@@ -19,7 +19,7 @@ psycopg2-binary==2.9.9
 opencv-python-headless==4.8.1.78
 numpy==1.26.3
 
-# ── OCR (lazy-loaded on first request, not at startup) ──────────────────────
+# ── OCR (loaded ONCE at module import, reused for all requests) ─────────────
 easyocr==1.7.2
 
 # ── PDF generation ────────────────────────────────────────────────────────────
