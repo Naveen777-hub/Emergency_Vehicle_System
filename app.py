@@ -3,11 +3,12 @@ app.py
 Flask application entry point — Render Free Tier Optimized.
 
 Architecture:
-  - Raspberry Pi runs traffic detection (YOLOv8n ONNX) locally.
-  - Pi uploads images ONLY for LOW/MEDIUM traffic.
-  - Cloud backend: EasyOCR (initialized after import to keep startup RAM low)
-                  → challan DB → dashboard.
-  - /api/upload accepts image + traffic_level, runs OCR, saves challan.
+  - Raspberry Pi runs ALL processing locally:
+      YOLOv8n ONNX (traffic) + EasyOCR (plate recognition).
+  - Pi uploads image + traffic_level + plate_text to cloud.
+  - Cloud backend: receives data → challan DB → dashboard.
+  - No EasyOCR / PyTorch on cloud — keeps Render 512MB happy.
+  - /api/upload accepts image + traffic_level + optional plate_text.
   - Render-ready: SECRET_KEY / DATABASE_URL from env vars.
   - SQLite local / PostgreSQL on Render.
 """
@@ -31,8 +32,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logging.getLogger("PIL").setLevel(logging.WARNING)   # Pillow noise
-logging.getLogger("easyocr").setLevel(logging.WARNING)  # EasyOCR noise
-logging.getLogger("torch").setLevel(logging.WARNING)    # Torch noise
 logger = logging.getLogger("App")
 
 # ── Flask app setup ───────────────────────────────────────────────────────────
@@ -126,36 +125,23 @@ def _ensure_database():
         db.session.commit()
 
 _db_ready = False
-_ocr_ready = False
 try:
     _ensure_database()
     _db_ready = True
 except Exception as exc:
     logger.warning("Database init deferred (will retry on first request): %s", exc)
 
-try:
-    pipeline_engine.init_ocr()
-    _ocr_ready = True
-except Exception as exc:
-    logger.warning("OCR init deferred (will init on first OCR request): %s", exc)
-
 
 @app.before_request
-def _ensure_db_and_ocr_on_request():
-    """Retry database and OCR init on first request if deferred at startup."""
-    global _db_ready, _ocr_ready
+def _ensure_db_on_request():
+    """Retry database init on first request if deferred at startup."""
+    global _db_ready
     if not _db_ready:
         try:
             _ensure_database()
             _db_ready = True
         except Exception as exc:
             logger.error("Database still unavailable: %s", exc)
-    if not _ocr_ready:
-        try:
-            pipeline_engine.init_ocr()
-            _ocr_ready = True
-        except Exception as exc:
-            logger.warning("OCR still unavailable: %s", exc)
 
 
 login_manager = LoginManager()
@@ -214,18 +200,19 @@ def process_pipeline():
     Pi already:
       1. Captured image.
       2. Ran local YOLOv8n ONNX traffic detection.
-      3. Determined traffic level (LOW / MEDIUM / HIGH).
-      4. Uploads only LOW or MEDIUM frames.
+      3. Ran local EasyOCR plate recognition.
+      4. Uploads image + traffic_level + plate_text.
 
     This endpoint:
       1. Reads + decodes image.
-      2. Runs EasyOCR (initialized at startup, not inside request handlers).
+      2. Uses Pi-provided plate_text (no cloud OCR).
       3. Saves challan to database.
       4. Returns result JSON.
 
     Multipart fields:
       image         — JPEG/PNG file
       traffic_level — "LOW" | "MEDIUM"
+      plate_text    — (optional) Pi-recognized plate; if absent, runs pipeline
     """
     start = time.time()
 
@@ -236,6 +223,8 @@ def process_pipeline():
         return jsonify({"error": "Empty file uploaded."}), 400
 
     traffic_level = request.form.get("traffic_level", "UNKNOWN").upper().strip()
+    plate_text    = request.form.get("plate_text", "").strip().upper()
+    plate_text    = plate_text if plate_text else None
 
     try:
         img_bytes = file.read()
@@ -245,17 +234,42 @@ def process_pipeline():
     except Exception as exc:
         return jsonify({"error": f"Image decode failed: {exc}"}), 500
 
-    try:
-        result = pipeline_engine.process_upload(img_np, traffic_level)
-    except Exception as exc:
-        logger.exception("Pipeline error: %s", exc)
-        return jsonify({"error": f"Pipeline failed: {exc}"}), 500
+    # Save wide image
+    timestamp  = datetime.now().strftime("%Y%m%d%H%M%S")
+    wide_fname = f"wide_{timestamp}.jpg"
+    wide_path  = os.path.join(UPLOAD_DIR, wide_fname)
+    wide_url   = f"/static/uploads/{wide_fname}"
+    cv2.imwrite(wide_path, img_np)
 
+    # Use Pi-provided plate_text or run fallback pipeline
+    if plate_text:
+        result = {
+            "plate_number":    plate_text,
+            "action":          "Challan Generated",
+            "wide_image_url":  wide_url,
+            "plate_image_url": None,
+            "status":          f"Plate from Pi: {plate_text}",
+        }
+        # Save plate image
+        plate_fname = f"plate_{plate_text}_{timestamp}.jpg"
+        plate_path  = os.path.join(UPLOAD_DIR, plate_fname)
+        plate_url   = f"/static/uploads/{plate_fname}"
+        cv2.imwrite(plate_path, img_np)
+        result["plate_image_url"] = plate_url
+    else:
+        # Fallback: run cloud pipeline (for legacy Pi clients without OCR)
+        try:
+            result = pipeline_engine.process_upload(img_np, traffic_level)
+        except Exception as exc:
+            logger.exception("Pipeline error: %s", exc)
+            return jsonify({"error": f"Pipeline failed: {exc}"}), 500
+
+    # Persist challan
     challan_number = None
     if result.get("action") in {"Challan Generated", "OCR Attempted", "OCR Failed"}:
         try:
-            plate_number = result.get("plate_number") or "UNKNOWN"
-            vehicle      = Vehicle.query.filter_by(plate_number=plate_number).first()
+            plate_number   = result.get("plate_number") or "UNKNOWN"
+            vehicle        = Vehicle.query.filter_by(plate_number=plate_number).first()
             challan_number = f"EVS{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:19]}"
 
             challan = Challan(
@@ -267,7 +281,7 @@ def process_pipeline():
                 density_pct     = result.get("density", 0),
                 free_space_px   = result.get("free_space", 0),
                 pipeline_status = result.get("status"),
-                wide_image_url  = result.get("wide_image_url"),
+                wide_image_url  = result.get("wide_image_url", wide_url),
                 plate_image_url = result.get("plate_image_url"),
                 status          = "Pending",
                 amount          = 500.0,
@@ -291,7 +305,7 @@ def process_pipeline():
         "plate_number":    result.get("plate_number"),
         "challan_number":  challan_number,
         "traffic_level":   traffic_level,
-        "wide_image_url":  result.get("wide_image_url"),
+        "wide_image_url":  result.get("wide_image_url", wide_url),
         "plate_image_url": result.get("plate_image_url"),
         "pipeline_status": result.get("status"),
     }), 200

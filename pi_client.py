@@ -1,18 +1,17 @@
 """
 pi_client.py — Raspberry Pi Edge Node Client
-Emergency Vehicle Priority System — v4
+Emergency Vehicle Priority System — v5 (Edge OCR)
 
 Run this script on the Raspberry Pi.
 
 Responsibilities:
   1. Capture image from Pi Camera (or USB webcam).
   2. Run YOLOv8n ONNX locally to detect traffic level.
-  3. Classify traffic as LOW / MEDIUM / HIGH.
-  4. Skip upload if HIGH traffic (road too congested).
-  5. Upload image + traffic_level to Flask backend.
+  3. Run EasyOCR locally to read license plate.
+  4. Upload image + traffic_level + plate_text to Flask backend.
 
 Requirements (on Pi):
-  pip install requests opencv-python onnxruntime numpy
+  pip install requests opencv-python onnxruntime numpy easyocr
 
 ONNX model export (run once on a machine with ultralytics):
   yolo export model=yolov8n.pt format=onnx imgsz=640
@@ -33,6 +32,7 @@ CONFIDENCE_THRESH = 0.4
 VEHICLE_CLASSES   = {2, 3, 5, 7}       # COCO: car, motorcycle, bus, truck
 HIGH_TRAFFIC_THRESHOLD    = 8          # Vehicles count → HIGH
 MEDIUM_TRAFFIC_THRESHOLD  = 3          # Vehicles count → MEDIUM (below = LOW)
+UPLOAD_TIMEOUT    = 80                 # Seconds to wait for cloud response
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("Pi-Client")
@@ -88,12 +88,44 @@ class LocalTrafficDetector:
             return "LOW"
 
 
+# ── Local OCR Plate Reader ────────────────────────────────────────────────────
+
+class LocalPlateReader:
+    """Runs EasyOCR on-device for license plate recognition."""
+
+    def __init__(self):
+        import easyocr
+        logger.info("Loading EasyOCR reader (Pi CPU)...")
+        self.reader = easyocr.Reader(["en"], gpu=False)
+        logger.info("EasyOCR reader ready.")
+
+    def read_plate(self, img_bgr: np.ndarray) -> str | None:
+        """Returns best plate text from image, or None."""
+        try:
+            result = self.reader.readtext(img_bgr)
+        except Exception as exc:
+            logger.warning("OCR failed: %s", exc)
+            return None
+
+        candidates = []
+        for _bbox, text, score in result:
+            clean = "".join(c for c in text if c.isalnum()).upper()
+            if len(clean) > 3 and score > 0.2:
+                candidates.append({"text": clean, "confidence": score})
+
+        if not candidates:
+            return None
+
+        best = max(candidates, key=lambda x: x["confidence"])
+        return best["text"]
+
+
 # ── Upload to Flask backend ───────────────────────────────────────────────────
 
-def upload_frame(img_bgr: np.ndarray, traffic_level: str) -> bool:
+def upload_frame(img_bgr: np.ndarray, traffic_level: str, plate_text: str | None) -> bool:
     """
     Encode image as JPEG and POST to Flask backend.
-    Returns True on success, False on failure.
+    Sends plate_text if available (edge OCR); cloud skips OCR if plate_text is present.
     """
     success, encoded = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if not success:
@@ -101,13 +133,16 @@ def upload_frame(img_bgr: np.ndarray, traffic_level: str) -> bool:
         return False
 
     img_bytes = encoded.tobytes()
+    post_data = {"traffic_level": traffic_level}
+    if plate_text:
+        post_data["plate_text"] = plate_text
 
     try:
         response = requests.post(
             SERVER_URL,
             files  = {"image": ("frame.jpg", img_bytes, "image/jpeg")},
-            data   = {"traffic_level": traffic_level},
-            timeout = 30,
+            data   = post_data,
+            timeout = UPLOAD_TIMEOUT,
         )
         if response.status_code == 200:
             result = response.json()
@@ -131,7 +166,14 @@ def upload_frame(img_bgr: np.ndarray, traffic_level: str) -> bool:
 
 def main():
     detector = LocalTrafficDetector(ONNX_MODEL_PATH)
-    cap      = cv2.VideoCapture(CAMERA_INDEX)
+
+    try:
+        plate_reader = LocalPlateReader()
+    except Exception as exc:
+        logger.error("Failed to init EasyOCR (out of memory?). Running without OCR: %s", exc)
+        plate_reader = None
+
+    cap = cv2.VideoCapture(CAMERA_INDEX)
 
     if not cap.isOpened():
         logger.error("Cannot open camera (index %d). Check connection.", CAMERA_INDEX)
@@ -146,15 +188,25 @@ def main():
             time.sleep(2)
             continue
 
-        # Classify traffic locally
         traffic_level = detector.classify_traffic(frame)
         logger.info("Traffic level: %s", traffic_level)
 
         if traffic_level == "HIGH":
             logger.info("HIGH traffic detected — skipping upload.")
-        else:
-            logger.info("Uploading frame (traffic: %s)...", traffic_level)
-            upload_frame(frame, traffic_level)
+            time.sleep(CAPTURE_INTERVAL)
+            continue
+
+        # Read plate on Pi before uploading
+        plate_text = None
+        if plate_reader is not None:
+            try:
+                plate_text = plate_reader.read_plate(frame)
+                logger.info("Plate detected: %s", plate_text or "None")
+            except Exception as exc:
+                logger.warning("Plate read error: %s", exc)
+
+        logger.info("Uploading frame (traffic: %s, plate: %s)...", traffic_level, plate_text)
+        upload_frame(frame, traffic_level, plate_text)
 
         time.sleep(CAPTURE_INTERVAL)
 

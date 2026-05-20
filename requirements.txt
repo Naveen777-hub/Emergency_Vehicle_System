@@ -1,5 +1,5 @@
 # Emergency Vehicle Priority System — Backend Dependencies
-# Render free tier optimized (512MB RAM)
+# Render free tier optimized (512MB RAM) — NO EasyOCR/PyTorch on cloud
 # All versions PINNED to prevent heavy auto-upgrades
 
 # ── Web framework ─────────────────────────────────────────────────────────────
@@ -18,9 +18,6 @@ psycopg2-binary==2.9.9
 # Headless OpenCV — no GUI, smaller footprint
 opencv-python-headless==4.8.1.78
 numpy==1.26.3
-
-# ── OCR (loaded ONCE at module import, reused for all requests) ─────────────
-easyocr==1.7.2
 
 # ── PDF generation ────────────────────────────────────────────────────────────
 reportlab==4.0.9
