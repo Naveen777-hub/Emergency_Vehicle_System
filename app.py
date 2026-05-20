@@ -1,18 +1,18 @@
 """
 app.py
-Flask application entry point — v5 (Edge-Cloud Architecture, Render Optimized).
+Flask application entry point — Render Free Tier Optimized.
 
 Architecture:
-  - Traffic detection runs on Raspberry Pi (edge node) via YOLOv8n ONNX.
-  - Pi uploads images ONLY for LOW/MEDIUM traffic; HIGH frames are skipped locally.
-  - Cloud backend runs EasyOCR directly on uploaded images — NO YOLO/ultralytics/torch.
-  - OCR is lazy-loaded on first request (not at startup) to keep RAM low (~50MB idle).
-  - /api/upload accepts a single image + traffic_level metadata.
-  - Render-ready: SECRET_KEY and DATABASE_URL read from environment variables.
-  - PostgreSQL supported via DATABASE_URL env var (SQLite fallback for local dev).
+  - Raspberry Pi runs traffic detection (YOLOv8n ONNX) locally.
+  - Pi uploads images ONLY for LOW/MEDIUM traffic.
+  - Cloud backend: EasyOCR (loaded ONCE at startup) → challan DB → dashboard.
+  - /api/upload accepts image + traffic_level, runs OCR, saves challan.
+  - Render-ready: SECRET_KEY / DATABASE_URL from env vars.
+  - SQLite local / PostgreSQL on Render.
 """
 
 import os
+import time
 import logging
 from datetime import datetime
 
@@ -195,58 +195,48 @@ latest_result_store: dict = {"timestamp": None, "data": None}
 @app.route("/api/upload", methods=["POST"])
 def process_pipeline():
     """
-    Raspberry Pi upload endpoint (v5 — Render-optimized, synchronous).
+    Raspberry Pi upload endpoint.
 
-    The Pi has already:
-      1. Captured the image.
-      2. Run local traffic detection (YOLOv8n ONNX).
+    Pi already:
+      1. Captured image.
+      2. Ran local YOLOv8n ONNX traffic detection.
       3. Determined traffic level (LOW / MEDIUM / HIGH).
-      4. Decided to upload (only LOW or MEDIUM reach this endpoint).
+      4. Uploads only LOW or MEDIUM frames.
 
     This endpoint:
-      1. Reads the uploaded image.
-      2. Reads the traffic_level metadata.
-      3. Runs EasyOCR directly on the image (lazy-loaded, no YOLO on cloud).
-      4. Saves challan to database.
-      5. Returns result JSON.
+      1. Reads + decodes image.
+      2. Runs EasyOCR (already loaded at startup, no lazy init delay).
+      3. Saves challan to database.
+      4. Returns result JSON.
 
-    Expected multipart fields:
-      image         — JPEG/PNG image file
-      traffic_level — string: "LOW" | "MEDIUM"
+    Multipart fields:
+      image         — JPEG/PNG file
+      traffic_level — "LOW" | "MEDIUM"
     """
-    # ── Validate input ────────────────────────────────────────────────────────
+    start = time.time()
+
     if "image" not in request.files:
         return jsonify({"error": "Missing 'image' file field."}), 400
-
     file = request.files["image"]
     if file.filename == "":
         return jsonify({"error": "Empty file uploaded."}), 400
 
     traffic_level = request.form.get("traffic_level", "UNKNOWN").upper().strip()
-    if traffic_level not in {"LOW", "MEDIUM", "UNKNOWN"}:
-        # Accept but warn — Pi may be misconfigured
-        logger.warning("Unexpected traffic_level value received: '%s'", traffic_level)
 
-    # ── Decode image ──────────────────────────────────────────────────────────
     try:
         img_bytes = file.read()
         img_np    = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
         if img_np is None:
-            return jsonify({"error": "Could not decode image. Send a valid JPEG/PNG."}), 400
+            return jsonify({"error": "Could not decode image."}), 400
     except Exception as exc:
-        logger.exception("Image decode error: %s", exc)
         return jsonify({"error": f"Image decode failed: {exc}"}), 500
 
-    # ── Run OCR pipeline ──────────────────────────────────────────────────────
     try:
         result = pipeline_engine.process_upload(img_np, traffic_level)
-        logger.info("Pipeline result: action=%s plate=%s traffic=%s",
-                    result.get("action"), result.get("plate_number"), traffic_level)
     except Exception as exc:
         logger.exception("Pipeline error: %s", exc)
         return jsonify({"error": f"Pipeline failed: {exc}"}), 500
 
-    # ── Persist challan to DB ─────────────────────────────────────────────────
     challan_number = None
     if result.get("action") in {"Challan Generated", "OCR Attempted", "OCR Failed"}:
         try:
@@ -270,15 +260,16 @@ def process_pipeline():
             )
             db.session.add(challan)
             db.session.commit()
-            logger.info("Challan %s saved to database.", challan_number)
         except Exception as exc:
             logger.exception("DB write error: %s", exc)
             db.session.rollback()
 
-    # ── Update live-feed state ────────────────────────────────────────────────
-    import time
     latest_result_store["timestamp"] = time.time()
     latest_result_store["data"]      = result
+
+    elapsed = time.time() - start
+    logger.info("Upload processed in %.2fs — action=%s plate=%s", elapsed,
+                result.get("action"), result.get("plate_number"))
 
     return jsonify({
         "status":          "processed",
@@ -330,7 +321,6 @@ def too_large(e):
 # ── Periodic old upload cleanup (runs once at startup) ──────────────────────
 def _cleanup_old_uploads(max_age_hours: int = 24):
     """Remove uploaded images older than max_age_hours to prevent disk bloat."""
-    import time
     now = time.time()
     cutoff = now - (max_age_hours * 3600)
     removed = 0
@@ -343,7 +333,7 @@ def _cleanup_old_uploads(max_age_hours: int = 24):
                 os.remove(fpath)
                 removed += 1
     if removed:
-        logger.info("Cleaned %d old upload(s) (threshold: %dh)", removed, max_age_hours)
+        logger.info("Cleaned %d old upload(s)", removed)
 
 
 _cleanup_old_uploads()

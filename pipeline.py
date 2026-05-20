@@ -1,58 +1,51 @@
 """
 pipeline.py
-Cloud-side OCR pipeline (v5 — Render Free Tier Optimized).
+Cloud-side OCR pipeline — Render Free Tier Optimized.
 
-Key changes from v4:
-  - Removed YOLOv8 / ultralytics completely (was using 300MB+ RAM).
-  - EasyOCR runs on the saved JPEG file (more reliable than raw array).
-  - OCR reader is LAZY-LOADED on first request (not at startup).
-  - Startup RAM: ~50MB. OCR RAM: ~300MB (loaded only when first image arrives).
-  - Render free tier (512MB) can handle this comfortably.
+- EasyOCR initialized ONCE at module load (not lazy, not inside request handlers).
+- OCR runs on saved JPEG file path (more reliable than raw numpy arrays).
+- Added OCR timeout via concurrent.futures to prevent hanging on corrupt images.
+- No YOLO. No ultralytics. No torch on cloud.
 """
 
 import os
-import cv2
 import logging
+import concurrent.futures
 from datetime import datetime
 
+import cv2
 import numpy as np
 
 logger = logging.getLogger("Pipeline")
 
-# ── Upload directory ──────────────────────────────────────────────────────────
 BASE_DIR   = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-
-# ── Lazy OCR loader ───────────────────────────────────────────────────────────
-_ocr_reader = None
-
-def _get_ocr_reader():
-    global _ocr_reader
-    if _ocr_reader is None:
-        import easyocr
-        logger.info("Lazy-loading EasyOCR reader (CPU)...")
-        _ocr_reader = easyocr.Reader(["en"], gpu=False)
-        logger.info("EasyOCR reader ready.")
-    return _ocr_reader
+# ── Global OCR reader (initialized ONCE at import, reused for all requests) ──
+import easyocr
+logger.info("Loading EasyOCR reader (CPU)...")
+_ocr_reader = easyocr.Reader(["en"], gpu=False)
+logger.info("EasyOCR reader ready.")
 
 
-# ── OCR on saved image file ──────────────────────────────────────────────────
 def _read_plate(image_path: str) -> str | None:
     """
-    Run EasyOCR on a saved image file path.
-    Using a file path is more reliable than passing numpy arrays,
-    which can trigger 'model does not support image input' errors
-    with certain EasyOCR/PyTorch versions.
+    Run EasyOCR on a saved image file.
+    Uses a 30-second timeout via thread pool to prevent hanging.
     """
-    reader     = _get_ocr_reader()
-    ocr_result = reader.readtext(image_path)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_ocr_reader.readtext, image_path)
+        try:
+            ocr_result = future.result(timeout=30)
+        except concurrent.futures.TimeoutError:
+            logger.error("OCR timed out on %s", image_path)
+            return None
 
     candidates = []
     for _bbox, text, score in ocr_result:
         clean = "".join(c for c in text if c.isalnum()).upper()
-        if len(clean) > 3:
+        if len(clean) > 3 and score > 0.2:
             candidates.append({"text": clean, "confidence": score})
 
     if not candidates:
@@ -62,39 +55,26 @@ def _read_plate(image_path: str) -> str | None:
     return best["text"]
 
 
-# ── Main pipeline callable ────────────────────────────────────────────────────
 class OCRPipeline:
     """
     Minimal cloud pipeline:
       1. Save uploaded image to static/uploads/.
-      2. Run EasyOCR on the saved file (not raw array).
+      2. Run EasyOCR on the saved file.
       3. Return structured result for challan generation.
-    No YOLO. No ultralytics. No torch. Just EasyOCR + OpenCV.
     """
 
     def process_upload(self, image_np: np.ndarray, traffic_level: str = "UNKNOWN") -> dict:
-        """
-        Process a single frame uploaded by the Raspberry Pi.
-
-        Args:
-            image_np:      Decoded OpenCV image (BGR).
-            traffic_level: 'LOW' | 'MEDIUM' (HIGH frames are never uploaded by Pi).
-
-        Returns:
-            dict with status, action, plate_number, wide_image_url, plate_image_url
-        """
         timestamp  = datetime.now().strftime("%Y%m%d%H%M%S")
         wide_fname = f"wide_{timestamp}.jpg"
         wide_path  = os.path.join(UPLOAD_DIR, wide_fname)
         wide_url   = f"/static/uploads/{wide_fname}"
 
         cv2.imwrite(wide_path, image_np)
-        logger.info("Saved uploaded frame → %s", wide_path)
 
         action          = "OCR Failed"
         plate_text      = None
         plate_url       = None
-        decision_status = f"Traffic: {traffic_level}. Running OCR on uploaded image."
+        decision_status = "Running OCR..."
 
         try:
             plate_text = _read_plate(wide_path)
@@ -105,18 +85,13 @@ class OCRPipeline:
                 plate_path  = os.path.join(UPLOAD_DIR, plate_fname)
                 plate_url   = f"/static/uploads/{plate_fname}"
                 cv2.imwrite(plate_path, image_np)
-                decision_status = (
-                    f"Traffic: {traffic_level}. "
-                    f"Plate detected: {plate_text}. Challan generated."
-                )
-                logger.info("OCR success — plate: %s", plate_text)
+                decision_status = f"Plate detected: {plate_text}. Challan generated."
             else:
                 action          = "OCR Failed"
-                decision_status = f"Traffic: {traffic_level}. No readable plate found in image."
-                logger.warning("OCR returned no readable plate.")
+                decision_status = "No readable plate found."
 
         except Exception as exc:
-            logger.exception("OCR pipeline error: %s", exc)
+            logger.exception("OCR error: %s", exc)
             action          = "OCR Failed"
             decision_status = f"Pipeline error: {exc}"
 
@@ -132,5 +107,4 @@ class OCRPipeline:
         }
 
 
-# ── Global singleton ──────────────────────────────────────────────────────────
 pipeline_engine = OCRPipeline()
