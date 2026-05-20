@@ -4,13 +4,14 @@ Cloud-side OCR pipeline — Render Free Tier Optimized.
 
 - EasyOCR initialized ONCE at module load (not lazy, not inside request handlers).
 - OCR runs on in-memory numpy array (no filesystem dependency), falls back to file path.
-- 30-second timeout via concurrent.futures prevents hanging on corrupt images.
+- No extra threads — relies on gunicorn --timeout for worker-level timeout safety.
+- gc.collect() after each OCR run to keep memory low.
 - No YOLO. No ultralytics. No torch on cloud.
 """
 
 import os
+import gc
 import logging
-import concurrent.futures
 from datetime import datetime
 
 import cv2
@@ -31,37 +32,28 @@ logger.info("EasyOCR reader ready.")
 
 def _read_plate(image_np: np.ndarray, image_path: str | None = None) -> str | None:
     """
-    Run EasyOCR on a numpy array (in-memory) with fallback to file path.
-    Uses a 30-second timeout via thread pool to prevent hanging.
+    Run EasyOCR on a numpy array (in-memory), falling back to file path.
+    Runs synchronously — no extra thread pools (avoids memory overhead).
     """
     result = None
 
-    # Strategy 1: pass numpy array directly (most reliable, no filesystem dep)
+    # Strategy 1: numpy array directly (no filesystem dependency)
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_ocr_reader.readtext, image_np)
-            try:
-                result = future.result(timeout=30)
-            except concurrent.futures.TimeoutError:
-                logger.error("OCR timed out on numpy array input")
+        result = _ocr_reader.readtext(image_np)
     except Exception as exc:
-        logger.warning("OCR with numpy array failed: %s", exc)
+        logger.warning("OCR via numpy failed: %s", exc)
 
-    # Strategy 2: fallback to file path if numpy returned nothing and path is available
+    # Strategy 2: fallback to saved file path
     if not result and image_path and os.path.isfile(image_path):
         logger.info("Falling back to file-path OCR: %s", image_path)
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(_ocr_reader.readtext, image_path)
-                result = future.result(timeout=30)
-        except concurrent.futures.TimeoutError:
-            logger.error("OCR timed out on %s", image_path)
-            return None
+            result = _ocr_reader.readtext(image_path)
         except Exception as exc:
-            logger.warning("OCR with file path also failed: %s", exc)
-            return None
+            logger.warning("OCR via file path also failed: %s", exc)
 
-    if result is None:
+    gc.collect()
+
+    if not result:
         return None
 
     candidates = []
