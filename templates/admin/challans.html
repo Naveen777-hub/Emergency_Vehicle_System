@@ -71,8 +71,8 @@
           <th>S.No.</th>
           <th>Challan Number</th>
           <th>Plate Number</th>
-          <th>AI Action</th>
-          <th>Density %</th>
+          <th>Action</th>
+          <th>Traffic</th>
           <th>Status</th>
           <th>Amount (Rs.)</th>
           <th>Date / Time</th>
@@ -90,13 +90,13 @@
             <td>
               {% if c.action == 'Challan Generated' %}
                 <span class="badge badge-challan">{{ c.action }}</span>
-              {% elif c.action == 'OCR Failed' %}
+              {% elif c.action in ('OCR Failed', 'No Plate') %}
                 <span class="badge badge-disputed">{{ c.action }}</span>
               {% else %}
                 <span style="font-size:12px; color:var(--text-muted);">{{ c.action }}</span>
               {% endif %}
             </td>
-            <td>{{ "%.1f"|format(c.density_pct) }}%</td>
+            <td>{{ c.traffic_level or '--' }}</td>
             <td><span class="badge badge-{{ c.status|lower }}">{{ c.status }}</span></td>
             <td>{{ "%.2f"|format(c.amount) }}</td>
             <td style="font-size:12px; white-space:nowrap;">

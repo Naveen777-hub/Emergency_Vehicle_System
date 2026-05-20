@@ -46,16 +46,16 @@
           <div class="iot-value" id="m-action">--</div>
         </div>
         <div class="iot-metric">
-          <div class="iot-label">Traffic Density</div>
-          <div class="iot-value" id="m-density">--</div>
+          <div class="iot-label">Traffic Level</div>
+          <div class="iot-value" id="m-traffic">--</div>
         </div>
         <div class="iot-metric">
-          <div class="iot-label">Free Space (px)</div>
-          <div class="iot-value" id="m-space">--</div>
-        </div>
-        <div class="iot-metric">
-          <div class="iot-label">OCR Plate Number</div>
+          <div class="iot-label">Plate Number</div>
           <div class="iot-value font-mono" id="m-plate">--</div>
+        </div>
+        <div class="iot-metric">
+          <div class="iot-label">Detection Source</div>
+          <div class="iot-value" id="m-source">Pi Edge</div>
         </div>
         <div class="iot-metric">
           <div class="iot-label">Queue Depth</div>
@@ -72,14 +72,14 @@
       <!-- Images -->
       <div class="iot-images-grid">
         <div class="img-viewer">
-          <div class="img-label">Wide Traffic View — Uploaded Camera Feed</div>
+          <div class="img-label">Vehicle Image — Uploaded Camera Feed</div>
           <div class="img-placeholder" id="wide-ph">No image received yet.</div>
-          <img id="img-wide" src="" alt="Wide traffic camera feed" style="display:none;">
+          <img id="img-wide" src="" alt="Vehicle camera feed" style="display:none;">
         </div>
         <div class="img-viewer">
-          <div class="img-label">Number Plate Crop — OCR Input</div>
+          <div class="img-label">Cropped Plate — Extracted by Pi</div>
           <div class="img-placeholder" id="plate-ph">No plate image received yet.</div>
-          <img id="img-plate" src="" alt="Number plate crop" style="display:none;">
+          <img id="img-plate" src="" alt="Cropped number plate" style="display:none;">
         </div>
       </div>
     </div>
@@ -124,9 +124,9 @@
           document.getElementById('iot-panel').classList.remove('d-none');
 
           document.getElementById('m-action').textContent  = d.action  || '--';
-          document.getElementById('m-density').textContent = (d.density || 0) + '%';
-          document.getElementById('m-space').textContent   = (d.free_space || 0) + ' px';
+          document.getElementById('m-traffic').textContent = d.traffic_level || '--';
           document.getElementById('m-plate').textContent   = d.plate_number || 'N/A';
+          document.getElementById('m-source').textContent  = 'Pi Edge';
           document.getElementById('m-status').textContent  = d.status  || '--';
 
           const dt = new Date(json.timestamp * 1000);

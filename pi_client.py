@@ -1,14 +1,15 @@
 """
 pi_client.py — Raspberry Pi Edge Node Client
-Emergency Vehicle Priority System — v5 (Edge OCR)
+Emergency Vehicle Priority System — v6 (Edge OCR + Plate Crop)
 
 Run this script on the Raspberry Pi.
 
 Responsibilities:
   1. Capture image from Pi Camera (or USB webcam).
   2. Run YOLOv8n ONNX locally to detect traffic level.
-  3. Run EasyOCR locally to read license plate.
-  4. Upload image + traffic_level + plate_text to Flask backend.
+  3. Run EasyOCR locally to read license plate + get bounding box.
+  4. Crop number plate region from the frame.
+  5. Upload vehicle_image + plate_image + plate_number + traffic_level.
 
 Requirements (on Pi):
   pip install requests opencv-python onnxruntime numpy easyocr
@@ -24,15 +25,15 @@ import requests
 import numpy as np
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-SERVER_URL        = "https://evps-backend.onrender.com/api/upload"  # ← Your Render URL
-ONNX_MODEL_PATH   = "yolov8n.onnx"     # Local ONNX model on Pi
-CAPTURE_INTERVAL  = 5                  # Seconds between captures
-CAMERA_INDEX      = 0                  # 0 = default webcam / Pi cam
+SERVER_URL        = "https://evps-backend.onrender.com/api/upload"
+ONNX_MODEL_PATH   = "yolov8n.onnx"
+CAPTURE_INTERVAL  = 5
+CAMERA_INDEX      = 0
 CONFIDENCE_THRESH = 0.4
-VEHICLE_CLASSES   = {2, 3, 5, 7}       # COCO: car, motorcycle, bus, truck
-HIGH_TRAFFIC_THRESHOLD    = 8          # Vehicles count → HIGH
-MEDIUM_TRAFFIC_THRESHOLD  = 3          # Vehicles count → MEDIUM (below = LOW)
-UPLOAD_TIMEOUT    = 80                 # Seconds to wait for cloud response
+VEHICLE_CLASSES   = {2, 3, 5, 7}
+HIGH_TRAFFIC_THRESHOLD    = 8
+MEDIUM_TRAFFIC_THRESHOLD  = 3
+UPLOAD_TIMEOUT    = 80
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("Pi-Client")
@@ -54,32 +55,25 @@ class LocalTrafficDetector:
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         img_res = cv2.resize(img_rgb, (input_size, input_size))
         blob    = img_res.astype(np.float32) / 255.0
-        blob    = np.transpose(blob, (2, 0, 1))[np.newaxis, ...]  # NCHW
+        blob    = np.transpose(blob, (2, 0, 1))[np.newaxis, ...]
         return blob
 
     def detect_vehicles(self, img_bgr: np.ndarray) -> int:
-        """Returns count of vehicles detected."""
         blob    = self.preprocess(img_bgr)
         outputs = self.session.run(None, {self.input_name: blob})
-        preds   = outputs[0][0]          # shape: (8400, 85) for YOLOv8n
+        preds   = outputs[0][0]
         vehicle_count = 0
-
         for det in preds:
-            conf = det[4]
-            if conf < CONFIDENCE_THRESH:
+            if det[4] < CONFIDENCE_THRESH:
                 continue
-            class_scores = det[5:]
-            class_id     = int(np.argmax(class_scores))
+            class_id = int(np.argmax(det[5:]))
             if class_id in VEHICLE_CLASSES:
                 vehicle_count += 1
-
         return vehicle_count
 
     def classify_traffic(self, img_bgr: np.ndarray) -> str:
-        """Returns 'LOW', 'MEDIUM', or 'HIGH'."""
         count = self.detect_vehicles(img_bgr)
         logger.info("Vehicles detected: %d", count)
-
         if count >= HIGH_TRAFFIC_THRESHOLD:
             return "HIGH"
         elif count >= MEDIUM_TRAFFIC_THRESHOLD:
@@ -88,10 +82,10 @@ class LocalTrafficDetector:
             return "LOW"
 
 
-# ── Local OCR Plate Reader ────────────────────────────────────────────────────
+# ── Local OCR Plate Reader + Crop ─────────────────────────────────────────────
 
 class LocalPlateReader:
-    """Runs EasyOCR on-device for license plate recognition."""
+    """Runs EasyOCR on-device; returns plate text + cropped plate image."""
 
     def __init__(self):
         import easyocr
@@ -99,50 +93,72 @@ class LocalPlateReader:
         self.reader = easyocr.Reader(["en"], gpu=False)
         logger.info("EasyOCR reader ready.")
 
-    def read_plate(self, img_bgr: np.ndarray) -> str | None:
-        """Returns best plate text from image, or None."""
+    def read_plate(self, img_bgr: np.ndarray):
+        """
+        Returns (plate_text, cropped_plate_bgr) or (None, None).
+        Crops the plate region from the original frame using EasyOCR's bounding box.
+        """
         try:
             result = self.reader.readtext(img_bgr)
         except Exception as exc:
             logger.warning("OCR failed: %s", exc)
-            return None
+            return None, None
 
         candidates = []
-        for _bbox, text, score in result:
+        for bbox, text, score in result:
             clean = "".join(c for c in text if c.isalnum()).upper()
             if len(clean) > 3 and score > 0.2:
-                candidates.append({"text": clean, "confidence": score})
+                candidates.append({"text": clean, "confidence": score, "bbox": bbox})
 
         if not candidates:
-            return None
+            return None, None
 
         best = max(candidates, key=lambda x: x["confidence"])
-        return best["text"]
+        pts = np.array(best["bbox"], dtype=np.int32)
+        x, y, w, h = cv2.boundingRect(pts)
+        # Add small padding
+        pad = 4
+        x = max(0, x - pad)
+        y = max(0, y - pad)
+        w = min(img_bgr.shape[1] - x, w + pad * 2)
+        h = min(img_bgr.shape[0] - y, h + pad * 2)
+        cropped = img_bgr[y:y+h, x:x+w]
+
+        return best["text"], cropped
 
 
 # ── Upload to Flask backend ───────────────────────────────────────────────────
 
-def upload_frame(img_bgr: np.ndarray, traffic_level: str, plate_text: str | None) -> bool:
+def upload_frame(img_bgr: np.ndarray, traffic_level: str,
+                 plate_text: str | None, plate_crop: np.ndarray | None) -> bool:
     """
-    Encode image as JPEG and POST to Flask backend.
-    Sends plate_text if available (edge OCR); cloud skips OCR if plate_text is present.
+    Upload vehicle_image + plate_image + plate_number + traffic_level.
+    Cloud backend no longer runs any OCR — it receives pre-processed data.
     """
-    success, encoded = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    if not success:
-        logger.error("Failed to encode image as JPEG.")
+    success_veh, encoded_veh = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not success_veh:
+        logger.error("Failed to encode vehicle image.")
         return False
 
-    img_bytes = encoded.tobytes()
+    files = {
+        "vehicle_image": ("vehicle.jpg", encoded_veh.tobytes(), "image/jpeg"),
+    }
+
+    if plate_crop is not None:
+        success_pl, encoded_pl = cv2.imencode(".jpg", plate_crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if success_pl:
+            files["plate_image"] = ("plate.jpg", encoded_pl.tobytes(), "image/jpeg")
+
     post_data = {"traffic_level": traffic_level}
     if plate_text:
-        post_data["plate_text"] = plate_text
+        post_data["plate_number"] = plate_text
 
     try:
         response = requests.post(
             SERVER_URL,
-            files  = {"image": ("frame.jpg", img_bytes, "image/jpeg")},
-            data   = post_data,
-            timeout = UPLOAD_TIMEOUT,
+            files=files,
+            data=post_data,
+            timeout=UPLOAD_TIMEOUT,
         )
         if response.status_code == 200:
             result = response.json()
@@ -174,7 +190,6 @@ def main():
         plate_reader = None
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
-
     if not cap.isOpened():
         logger.error("Cannot open camera (index %d). Check connection.", CAMERA_INDEX)
         return
@@ -196,17 +211,19 @@ def main():
             time.sleep(CAPTURE_INTERVAL)
             continue
 
-        # Read plate on Pi before uploading
-        plate_text = None
+        plate_text  = None
+        plate_crop  = None
         if plate_reader is not None:
             try:
-                plate_text = plate_reader.read_plate(frame)
-                logger.info("Plate detected: %s", plate_text or "None")
+                plate_text, plate_crop = plate_reader.read_plate(frame)
+                logger.info("Plate: %s | cropped: %s",
+                            plate_text or "None",
+                            f"{plate_crop.shape[1]}x{plate_crop.shape[0]}" if plate_crop is not None else "None")
             except Exception as exc:
                 logger.warning("Plate read error: %s", exc)
 
-        logger.info("Uploading frame (traffic: %s, plate: %s)...", traffic_level, plate_text)
-        upload_frame(frame, traffic_level, plate_text)
+        logger.info("Uploading — traffic: %s, plate: %s", traffic_level, plate_text)
+        upload_frame(frame, traffic_level, plate_text, plate_crop)
 
         time.sleep(CAPTURE_INTERVAL)
 

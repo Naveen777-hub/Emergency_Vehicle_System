@@ -4,11 +4,11 @@ Flask application entry point — Render Free Tier Optimized.
 
 Architecture:
   - Raspberry Pi runs ALL processing locally:
-      YOLOv8n ONNX (traffic) + EasyOCR (plate recognition).
-  - Pi uploads image + traffic_level + plate_text to cloud.
-  - Cloud backend: receives data → challan DB → dashboard.
-  - No EasyOCR / PyTorch on cloud — keeps Render 512MB happy.
-  - /api/upload accepts image + traffic_level + optional plate_text.
+      YOLOv8n ONNX (traffic) + EasyOCR (plate recognition + crop).
+  - Pi uploads vehicle_image + plate_image + plate_number + traffic_level.
+  - Cloud backend: saves evidence, creates challan record, serves dashboard.
+  - No EasyOCR / PyTorch / YOLO on cloud — keeps Render 512MB happy.
+  - /api/upload accepts vehicle_image, plate_image, plate_number, traffic_level.
   - Render-ready: SECRET_KEY / DATABASE_URL from env vars.
   - SQLite local / PostgreSQL on Render.
 """
@@ -20,18 +20,15 @@ from datetime import datetime
 
 from flask import Flask, request, jsonify, redirect, url_for, render_template
 from flask_login import LoginManager, current_user
-import cv2
-import numpy as np
 
 from database import db, User, Vehicle, Challan
-from pipeline import pipeline_engine
 
-# ── Logging (single root config — pipeline.py uses child loggers) ──────────
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logging.getLogger("PIL").setLevel(logging.WARNING)   # Pillow noise
+logging.getLogger("PIL").setLevel(logging.WARNING)
 logger = logging.getLogger("App")
 
 # ── Flask app setup ───────────────────────────────────────────────────────────
@@ -43,16 +40,14 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ── Configuration (Render-safe) ───────────────────────────────────────────────
+# ── Configuration ─────────────────────────────────────────────────────────────
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "evps-dev-key-change-in-production")
 
-# ── Production session security ─────────────────────────────────────────────
 app.config["SESSION_COOKIE_HTTPONLY"]  = True
 app.config["SESSION_COOKIE_SAMESITE"]  = "Lax"
 app.config["SESSION_COOKIE_SECURE"]    = bool(os.environ.get("SESSION_COOKIE_SECURE", "True").lower() == "true")
-app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
+app.config["PERMANENT_SESSION_LIFETIME"] = 86400
 
-# PostgreSQL on Render via DATABASE_URL env var; SQLite fallback for local dev.
 _raw_db_url = os.environ.get("DATABASE_URL", "")
 if _raw_db_url.startswith("postgres://"):
     _raw_db_url = _raw_db_url.replace("postgres://", "postgresql://", 1)
@@ -63,9 +58,8 @@ app.config["SQLALCHEMY_DATABASE_URI"] = (
     else f"sqlite:///{os.path.join(DATA_DIR, 'evs.db')}"
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["MAX_CONTENT_LENGTH"]             = 16 * 1024 * 1024  # 16 MB
+app.config["MAX_CONTENT_LENGTH"]             = 16 * 1024 * 1024
 
-# ── Connection pooling for Render free tier (limited connections) ──────────
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_size": 5,
     "pool_recycle": 3600,
@@ -75,20 +69,15 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 # ── Extensions ────────────────────────────────────────────────────────────────
 db.init_app(app)
 
-# ── Auto-setup: create tables, migrate columns, seed admin ────────────────
+
+# ── Auto-setup: tables, migration, admin seed ────────────────────────────────
 def _ensure_database():
-    """Idempotent startup initializer:
-    1. Create all tables if they don't exist (handles fresh PostgreSQL on Render).
-    2. Add missing columns to existing tables.
-    3. Seed default admin user if not present.
-    """
     from sqlalchemy import inspect
     with app.app_context():
         inspector = inspect(db.engine)
         existing_tables = set(inspector.get_table_names())
         model_tables    = set(db.metadata.tables.keys())
 
-        # 1. Create missing tables
         if not existing_tables:
             db.create_all()
             logger.info("Created all database tables.")
@@ -98,7 +87,6 @@ def _ensure_database():
             logger.info("Created missing tables: %s", missing)
             existing_tables |= missing
 
-        # 2. Add missing columns to existing tables
         for table_name, table in db.metadata.tables.items():
             if table_name not in existing_tables:
                 continue
@@ -112,7 +100,6 @@ def _ensure_database():
                     db.session.execute(sql)
                     logger.info("Auto-migrated: added column '%s' to '%s'", col.name, table_name)
 
-        # 3. Seed admin user if missing
         if not User.query.filter_by(username="admin").first():
             admin = User(
                 username="admin", full_name="System Administrator",
@@ -124,6 +111,7 @@ def _ensure_database():
 
         db.session.commit()
 
+
 _db_ready = False
 try:
     _ensure_database()
@@ -134,7 +122,6 @@ except Exception as exc:
 
 @app.before_request
 def _ensure_db_on_request():
-    """Retry database init on first request if deferred at startup."""
     global _db_ready
     if not _db_ready:
         try:
@@ -166,7 +153,7 @@ app.register_blueprint(admin_bp)
 app.register_blueprint(user_bp)
 
 
-# ── Jinja2 global context ─────────────────────────────────────────────────────
+# ── Jinja2 globals ────────────────────────────────────────────────────────────
 @app.context_processor
 def inject_globals():
     now = datetime.now()
@@ -187,7 +174,6 @@ def index():
 
 
 # ── Shared live-feed state ────────────────────────────────────────────────────
-# Stores the most recent pipeline result for the live dashboard to poll.
 latest_result_store: dict = {"timestamp": None, "data": None}
 
 
@@ -195,133 +181,138 @@ latest_result_store: dict = {"timestamp": None, "data": None}
 @app.route("/api/upload", methods=["POST"])
 def process_pipeline():
     """
-    Raspberry Pi upload endpoint.
+    Raspberry Pi upload endpoint (v6 — Pi does all processing).
 
     Pi already:
       1. Captured image.
-      2. Ran local YOLOv8n ONNX traffic detection.
-      3. Ran local EasyOCR plate recognition.
-      4. Uploads image + traffic_level + plate_text.
+      2. Ran YOLOv8n ONNX traffic detection.
+      3. Ran EasyOCR plate recognition + crop.
+      4. Uploads vehicle_image + plate_image + plate_number + traffic_level.
 
     This endpoint:
-      1. Reads + decodes image.
-      2. Uses Pi-provided plate_text (no cloud OCR).
-      3. Saves challan to database.
-      4. Returns result JSON.
+      1. Saves vehicle_image and plate_image to disk.
+      2. Creates challan with Pi-provided plate_number.
+      3. Returns result JSON.
 
     Multipart fields:
-      image         — JPEG/PNG file
+      vehicle_image — JPEG full camera frame
+      plate_image   — JPEG cropped number plate (optional)
+      plate_number  — Pi-recognized plate text (optional)
       traffic_level — "LOW" | "MEDIUM"
-      plate_text    — (optional) Pi-recognized plate; if absent, runs pipeline
     """
     start = time.time()
 
-    if "image" not in request.files:
-        return jsonify({"error": "Missing 'image' file field."}), 400
-    file = request.files["image"]
-    if file.filename == "":
-        return jsonify({"error": "Empty file uploaded."}), 400
+    # ── Validate ──────────────────────────────────────────────────────────
+    if "vehicle_image" not in request.files:
+        return jsonify({"error": "Missing 'vehicle_image' file field."}), 400
 
+    veh_file = request.files["vehicle_image"]
+    if veh_file.filename == "":
+        return jsonify({"error": "Empty vehicle_image uploaded."}), 400
+
+    plate_file   = request.files.get("plate_image")
+    plate_number = request.form.get("plate_number", "").strip().upper()
+    plate_number = plate_number if plate_number else None
     traffic_level = request.form.get("traffic_level", "UNKNOWN").upper().strip()
-    plate_text    = request.form.get("plate_text", "").strip().upper()
-    plate_text    = plate_text if plate_text else None
 
-    try:
-        img_bytes = file.read()
-        img_np    = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
-        if img_np is None:
-            return jsonify({"error": "Could not decode image."}), 400
-    except Exception as exc:
-        return jsonify({"error": f"Image decode failed: {exc}"}), 500
-
-    # Save wide image
+    # ── Generate secure filenames ─────────────────────────────────────────
     timestamp  = datetime.now().strftime("%Y%m%d%H%M%S")
-    wide_fname = f"wide_{timestamp}.jpg"
-    wide_path  = os.path.join(UPLOAD_DIR, wide_fname)
-    wide_url   = f"/static/uploads/{wide_fname}"
-    cv2.imwrite(wide_path, img_np)
+    safe_plate = (plate_number or "UNKNOWN").replace(" ", "_").replace("/", "_")
+    veh_fname  = f"vehicle_{safe_plate}_{timestamp}.jpg"
+    veh_path   = os.path.join(UPLOAD_DIR, veh_fname)
+    veh_url    = f"/static/uploads/{veh_fname}"
 
-    # Use Pi-provided plate_text or run fallback pipeline
-    if plate_text:
-        result = {
-            "plate_number":    plate_text,
-            "action":          "Challan Generated",
-            "wide_image_url":  wide_url,
-            "plate_image_url": None,
-            "status":          f"Plate from Pi: {plate_text}",
-        }
-        # Save plate image
-        plate_fname = f"plate_{plate_text}_{timestamp}.jpg"
-        plate_path  = os.path.join(UPLOAD_DIR, plate_fname)
-        plate_url   = f"/static/uploads/{plate_fname}"
-        cv2.imwrite(plate_path, img_np)
-        result["plate_image_url"] = plate_url
+    # ── Save vehicle image ────────────────────────────────────────────────
+    try:
+        veh_file.save(veh_path)
+    except Exception as exc:
+        logger.error("Failed to save vehicle_image: %s", exc)
+        return jsonify({"error": "Failed to save vehicle image."}), 500
+
+    # ── Save plate image (if provided) ────────────────────────────────────
+    plate_url = None
+    if plate_file and plate_file.filename:
+        pl_fname = f"plate_{safe_plate}_{timestamp}.jpg"
+        pl_path  = os.path.join(UPLOAD_DIR, pl_fname)
+        plate_url = f"/static/uploads/{pl_fname}"
+        try:
+            plate_file.save(pl_path)
+        except Exception as exc:
+            logger.error("Failed to save plate_image: %s", exc)
+
+    # ── Build result ──────────────────────────────────────────────────────
+    if plate_number:
+        action          = "Challan Generated"
+        pipeline_status = f"Plate from Pi: {plate_number}"
     else:
-        # Fallback: run cloud pipeline (for legacy Pi clients without OCR)
-        try:
-            result = pipeline_engine.process_upload(img_np, traffic_level)
-        except Exception as exc:
-            logger.exception("Pipeline error: %s", exc)
-            return jsonify({"error": f"Pipeline failed: {exc}"}), 500
+        action          = "OCR Failed"
+        pipeline_status = "No plate_number received from Pi."
 
-    # Persist challan
+    result = {
+        "plate_number":    plate_number,
+        "action":          action,
+        "wide_image_url":  veh_url,
+        "plate_image_url": plate_url,
+        "status":          pipeline_status,
+        "traffic_level":   traffic_level,
+        "density":         0.0,
+        "free_space":      0,
+    }
+
+    # ── Persist challan ───────────────────────────────────────────────────
     challan_number = None
-    if result.get("action") in {"Challan Generated", "OCR Attempted", "OCR Failed"}:
-        try:
-            plate_number   = result.get("plate_number") or "UNKNOWN"
-            vehicle        = Vehicle.query.filter_by(plate_number=plate_number).first()
-            challan_number = f"EVS{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:19]}"
+    try:
+        vehicle = Vehicle.query.filter_by(plate_number=plate_number).first() if plate_number else None
+        challan_number = f"EVS{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:19]}"
 
-            challan = Challan(
-                challan_number  = challan_number,
-                plate_number    = plate_number,
-                vehicle_id      = vehicle.id if vehicle else None,
-                action          = result.get("action"),
-                traffic_level   = traffic_level,
-                density_pct     = result.get("density", 0),
-                free_space_px   = result.get("free_space", 0),
-                pipeline_status = result.get("status"),
-                wide_image_url  = result.get("wide_image_url", wide_url),
-                plate_image_url = result.get("plate_image_url"),
-                status          = "Pending",
-                amount          = 500.0,
-            )
-            db.session.add(challan)
-            db.session.commit()
-        except Exception as exc:
-            logger.exception("DB write error: %s", exc)
-            db.session.rollback()
+        challan = Challan(
+            challan_number  = challan_number,
+            plate_number    = plate_number or "UNKNOWN",
+            vehicle_id      = vehicle.id if vehicle else None,
+            action          = action,
+            traffic_level   = traffic_level,
+            density_pct     = 0.0,
+            free_space_px   = 0,
+            pipeline_status = pipeline_status,
+            wide_image_url  = veh_url,
+            plate_image_url = plate_url,
+            status          = "Pending",
+            amount          = 500.0,
+        )
+        db.session.add(challan)
+        db.session.commit()
+    except Exception as exc:
+        logger.exception("DB write error: %s", exc)
+        db.session.rollback()
 
+    # ── Update live feed ──────────────────────────────────────────────────
     latest_result_store["timestamp"] = time.time()
     latest_result_store["data"]      = result
 
     elapsed = time.time() - start
-    logger.info("Upload processed in %.2fs — action=%s plate=%s", elapsed,
-                result.get("action"), result.get("plate_number"))
+    logger.info("Upload processed in %.2fs — plate=%s", elapsed, plate_number)
 
     return jsonify({
         "status":          "processed",
-        "action":          result.get("action"),
-        "plate_number":    result.get("plate_number"),
+        "action":          action,
+        "plate_number":    plate_number,
         "challan_number":  challan_number,
         "traffic_level":   traffic_level,
-        "wide_image_url":  result.get("wide_image_url", wide_url),
-        "plate_image_url": result.get("plate_image_url"),
-        "pipeline_status": result.get("status"),
+        "wide_image_url":  veh_url,
+        "plate_image_url": plate_url,
+        "pipeline_status": pipeline_status,
     }), 200
 
 
 # ── Live-feed polling endpoint ────────────────────────────────────────────────
 @app.route("/api/latest", methods=["GET"])
 def get_latest_result():
-    """Returns the most recent pipeline result as JSON (polled by admin live monitor)."""
     return jsonify(latest_result_store)
 
 
-# ── Health check (Render / uptime monitors) ───────────────────────────────────
+# ── Health check ──────────────────────────────────────────────────────────────
 @app.route("/api/health", methods=["GET"])
 def health_check():
-    """Simple health endpoint. Returns 200 if the app is alive."""
     return jsonify({"status": "ok", "service": "EVPS Flask Backend"}), 200
 
 
@@ -346,9 +337,8 @@ def too_large(e):
     return jsonify({"error": "File too large. Maximum size is 16 MB."}), 413
 
 
-# ── Periodic old upload cleanup (runs once at startup) ──────────────────────
+# ── Periodic cleanup ─────────────────────────────────────────────────────────
 def _cleanup_old_uploads(max_age_hours: int = 24):
-    """Remove uploaded images older than max_age_hours to prevent disk bloat."""
     now = time.time()
     cutoff = now - (max_age_hours * 3600)
     removed = 0

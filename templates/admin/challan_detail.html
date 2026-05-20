@@ -70,26 +70,25 @@
       </div>
     </div>
 
-    <!-- AI Pipeline Analysis -->
+    <!-- Pi Pipeline Analysis -->
     <div class="gov-section">
-      <div class="gov-section-header">AI Pipeline Analysis</div>
+      <div class="gov-section-header">Pi Pipeline Report</div>
       <div class="gov-section-body">
         <table class="detail-table">
           <tr><td class="dt-label">System Action</td>
             <td>
               {% if challan.action == 'Challan Generated' %}
                 <span class="badge badge-challan">{{ challan.action }}</span>
-              {% elif challan.action == 'OCR Failed' %}
+              {% elif challan.action in ('OCR Failed', 'No Plate') %}
                 <span class="badge badge-disputed">{{ challan.action }}</span>
               {% else %}
                 {{ challan.action }}
               {% endif %}
             </td>
           </tr>
-          <tr><td class="dt-label">Traffic Density</td><td>{{ "%.1f"|format(challan.density_pct) }}%</td></tr>
-          <tr><td class="dt-label">Free Space Detected</td><td>{{ challan.free_space_px }} pixels</td></tr>
+          <tr><td class="dt-label">Traffic Level</td><td>{{ challan.traffic_level or '—' }}</td></tr>
           <tr><td class="dt-label">Decision Reason</td><td style="font-size:12px;">{{ challan.pipeline_status or '—' }}</td></tr>
-          <tr><td class="dt-label">Detection Engine</td><td>EasyOCR (Raspberry Pi Edge Node)</td></tr>
+          <tr><td class="dt-label">Processing Node</td><td>Raspberry Pi (Edge) — YOLOv8n + EasyOCR</td></tr>
         </table>
       </div>
     </div>
@@ -118,7 +117,7 @@
   <div class="col-half">
 
     <div class="gov-section">
-      <div class="gov-section-header">Wide Traffic View (Uploaded Camera Feed)</div>
+      <div class="gov-section-header">Vehicle Image (Uploaded Camera Feed)</div>
       <div class="gov-section-body">
         {% if challan.wide_image_url %}
           <img src="{{ challan.wide_image_url }}" alt="Wide Traffic View" style="width:100%; display:block; max-height:350px; object-fit:contain; background:#000;">
@@ -131,17 +130,17 @@
     </div>
 
     <div class="gov-section">
-      <div class="gov-section-header">Number Plate OCR Crop</div>
+      <div class="gov-section-header">Cropped Plate (Extracted by Pi)</div>
       <div class="gov-section-body">
         {% if challan.plate_image_url %}
-          <img src="{{ challan.plate_image_url }}" alt="Plate OCR Crop" style="width:100%; display:block; max-height:200px; object-fit:contain; background:#000;">
+          <img src="{{ challan.plate_image_url }}" alt="Cropped Plate" style="width:100%; display:block; max-height:200px; object-fit:contain; background:#000;">
           <div style="padding:10px 16px;">
-            <span class="text-muted font-sm">OCR Extracted Plate Number:&nbsp;</span>
+            <span class="text-muted font-sm">Pi-Detected Plate Number:&nbsp;</span>
             <strong class="font-mono" style="font-size:18px; color:var(--navy);">{{ challan.plate_number }}</strong>
           </div>
         {% else %}
           <div style="padding:30px; text-align:center; color:var(--text-muted); font-style:italic;">
-            No plate image available. OCR may not have been triggered for this record.
+            No plate image received from Pi.
           </div>
         {% endif %}
       </div>

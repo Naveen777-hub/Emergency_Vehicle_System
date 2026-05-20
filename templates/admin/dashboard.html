@@ -78,12 +78,12 @@
           <div class="iot-value" id="m-action">--</div>
         </div>
         <div class="iot-metric">
-          <div class="iot-label">Traffic Density</div>
-          <div class="iot-value" id="m-density">--</div>
+          <div class="iot-label">Traffic Level</div>
+          <div class="iot-value" id="m-traffic">--</div>
         </div>
         <div class="iot-metric">
-          <div class="iot-label">Free Space</div>
-          <div class="iot-value" id="m-space">--</div>
+          <div class="iot-label">Plate Number</div>
+          <div class="iot-value font-mono" id="m-plate">--</div>
         </div>
         <div class="iot-metric">
           <div class="iot-label">Last Updated</div>
@@ -95,14 +95,14 @@
       </div>
       <div class="iot-images-grid">
         <div class="img-viewer">
-          <div class="img-label">Wide Traffic View (Uploaded Camera Feed)</div>
+          <div class="img-label">Vehicle Image (Uploaded Camera Feed)</div>
           <div class="img-placeholder" id="wide-placeholder">No image received yet.</div>
-          <img id="img-wide" src="" alt="Wide Camera Feed" style="display:none;">
+          <img id="img-wide" src="" alt="Vehicle Camera Feed" style="display:none;">
         </div>
         <div class="img-viewer">
-          <div class="img-label">Plate OCR Output</div>
+          <div class="img-label">Cropped Plate (Extracted by Pi)</div>
           <div class="img-placeholder" id="plate-placeholder">No plate image received yet.</div>
-          <img id="img-plate" src="" alt="Plate OCR Image" style="display:none;">
+          <img id="img-plate" src="" alt="Cropped Plate" style="display:none;">
         </div>
       </div>
     </div>
@@ -140,7 +140,7 @@
             <td>
               {% if c.action == 'Challan Generated' %}
                 <span class="badge badge-challan">{{ c.action }}</span>
-              {% elif c.action == 'OCR Failed' %}
+              {% elif c.action in ('OCR Failed', 'No Plate') %}
                 <span class="badge badge-disputed">{{ c.action }}</span>
               {% else %}
                 {{ c.action }}
@@ -189,8 +189,8 @@
           document.getElementById('iot-panel').classList.remove('d-none');
 
           document.getElementById('m-action').textContent  = d.action  || '--';
-          document.getElementById('m-density').textContent = (d.density || 0) + '%';
-          document.getElementById('m-space').textContent   = (d.free_space || 0) + ' px';
+          document.getElementById('m-traffic').textContent = d.traffic_level || '--';
+          document.getElementById('m-plate').textContent   = d.plate_number || 'N/A';
           document.getElementById('m-status').textContent  = d.status  || '--';
 
           const dt = new Date(json.timestamp * 1000);
