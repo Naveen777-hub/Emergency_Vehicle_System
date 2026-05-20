@@ -42,28 +42,15 @@ def _get_ocr_reader():
     return _ocr_reader
 
 
-# ── Image preprocessing ───────────────────────────────────────────────────────
-def _preprocess(img: np.ndarray) -> np.ndarray:
-    """Grayscale + adaptive threshold for cleaner plate OCR."""
-    gray   = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur   = cv2.GaussianBlur(gray, (5, 5), 0)
-    thresh = cv2.adaptiveThreshold(
-        blur, 255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY, 11, 2,
-    )
-    return thresh
-
-
 # ── OCR on full image ─────────────────────────────────────────────────────────
 def _read_plate(image_np: np.ndarray) -> str | None:
     """
     Run EasyOCR on the full uploaded image.
-    Returns the best alphanumeric string > 3 chars, or None.
+    Passes the raw BGR image directly (EasyOCR handles its own preprocessing).
+    Single-channel images cause 'model does not support image input' errors.
     """
     reader     = _get_ocr_reader()
-    processed  = _preprocess(image_np)
-    ocr_result = reader.readtext(processed)
+    ocr_result = reader.readtext(image_np)
 
     candidates = []
     for _bbox, text, score in ocr_result:
