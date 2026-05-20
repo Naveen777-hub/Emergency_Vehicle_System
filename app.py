@@ -75,30 +75,74 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 # ── Extensions ────────────────────────────────────────────────────────────────
 db.init_app(app)
 
-# ── Auto-migration: add missing columns to existing tables ──────────────────
-def _auto_migrate():
-    """Add columns to existing tables that exist in models but not in DB.
-    Skips missing tables gracefully (for first-time init via init_db.py)."""
+# ── Auto-setup: create tables, migrate columns, seed admin ────────────────
+def _ensure_database():
+    """Idempotent startup initializer:
+    1. Create all tables if they don't exist (handles fresh PostgreSQL on Render).
+    2. Add missing columns to existing tables.
+    3. Seed default admin user if not present.
+    """
     from sqlalchemy import inspect
     with app.app_context():
         inspector = inspect(db.engine)
         existing_tables = set(inspector.get_table_names())
+        model_tables    = set(db.metadata.tables.keys())
+
+        # 1. Create missing tables
+        if not existing_tables:
+            db.create_all()
+            logger.info("Created all database tables.")
+            existing_tables = model_tables
+        elif missing := model_tables - existing_tables:
+            db.create_all()
+            logger.info("Created missing tables: %s", missing)
+            existing_tables |= missing
+
+        # 2. Add missing columns to existing tables
         for table_name, table in db.metadata.tables.items():
             if table_name not in existing_tables:
                 continue
-            existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+            db_cols = {c["name"] for c in inspector.get_columns(table_name)}
             for col in table.columns:
-                if col.name not in existing_cols:
+                if col.name not in db_cols:
                     col_type = col.type.compile(db.engine.dialect)
-                    nullable = "NULL" if col.nullable else "NOT NULL"
-                    chunks = f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type} {nullable}"
+                    sql = f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}"
                     if col.default is not None:
-                        chunks += f" DEFAULT {col.default.arg}"
-                    db.session.execute(chunks)
-                    logger.info("Auto-migrated: added column '%s' to table '%s'", col.name, table_name)
+                        sql += f" DEFAULT {col.default.arg}"
+                    db.session.execute(sql)
+                    logger.info("Auto-migrated: added column '%s' to '%s'", col.name, table_name)
+
+        # 3. Seed admin user if missing
+        if not User.query.filter_by(username="admin").first():
+            admin = User(
+                username="admin", full_name="System Administrator",
+                email="admin@evps.gov.in", role="admin", is_active=True,
+            )
+            admin.set_password("admin123")
+            db.session.add(admin)
+            logger.info("Seeded default admin user.")
+
         db.session.commit()
 
-_auto_migrate()
+_db_ready = False
+try:
+    _ensure_database()
+    _db_ready = True
+except Exception as exc:
+    logger.warning("Database init deferred (will retry on first request): %s", exc)
+
+
+@app.before_request
+def _ensure_db_on_request():
+    """Retry database init on first request if it was deferred at startup."""
+    global _db_ready
+    if not _db_ready:
+        try:
+            _ensure_database()
+            _db_ready = True
+        except Exception as exc:
+            logger.error("Database still unavailable: %s", exc)
+
 
 login_manager = LoginManager()
 login_manager.init_app(app)
